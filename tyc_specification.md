@@ -515,6 +515,22 @@ A **function call** is an expression that invokes a function. It has the form:
 
 where `<argument_list>` is a comma-separated list of expressions (or empty). The type of a function call expression is the return type of the function being called.
 
+### Assignment Expression
+
+An **assignment expression** assigns a value to a variable and can be used as an expression. It has the form:
+
+```tyc
+<identifier> = <expression>
+```
+
+or
+
+```tyc
+<member_access> = <expression>
+```
+
+Assignment expressions are right-associative, allowing chained assignments such as `x = y = z = 10;`, which is parsed as `x = (y = (z = 10));`. Assignment expressions can be used in expression contexts, for example: `int y = (x = 5) + 7;`.
+
 ### Primary Expression
 
 Primary expressions include:
