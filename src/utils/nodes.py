@@ -5,7 +5,7 @@ the abstract syntax tree for TyC programs.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .visitor import ASTVisitor
@@ -308,13 +308,13 @@ class ForStmt(Stmt):
 
     def __init__(
         self,
-        init: Optional["VarDecl"],
+        init: Optional[Union["VarDecl", "AssignStmt"]],
         condition: Optional["Expr"],
         update: Optional["Expr"],
         body: Stmt,
     ):
         super().__init__()
-        self.init = init  # VarDecl or None
+        self.init = init  # VarDecl, AssignStmt, or None
         self.condition = condition
         self.update = update  # Expr or None (PrefixOp, PostfixOp, or AssignExpr)
         self.body = body
