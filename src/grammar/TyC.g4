@@ -46,8 +46,8 @@ VOID     : 'void';
 WHILE    : 'while';
 
 //2. --- OPERATORS ---
-PLUS        : '+';
-MINUS       : '-';
+ADD        : '+';
+SUB       : '-';
 MUL         : '*';
 DIV         : '/';
 MOD         : '%';
@@ -63,11 +63,11 @@ GT          : '>';
 LE          : '<=';
 GE          : '>=';
 
-ASSIGN      : '=';
+ASSIGNMENT      : '=';
 
 // Increment/Decrement
-INC         : '++';
-DEC         : '--';
+INCREMENT         : '++';
+DECREMENT         : '--';
 
 // Member Access (Struct)
 DOT         : '.';
@@ -86,11 +86,11 @@ COLON       : ':';
 // 4. Identifiers & Literals 
 IDENTIFIER: [a-zA-Z'_'][a-zA-Z0-9'_']*;
 fragment DIGIT: [0-9];
-fragment FRAC: '.'DIGIT+;
-fragment EXPONENT: 'e''-'?DIGIT+;
+fragment FRAC: '.'DIGIT*;
+fragment EXPONENT: ['E''e']'-'?DIGIT+;
+FLOATLIT: DIGIT* (FRAC|FRAC? EXPONENT);
 INTLIT: '0' | [1-9] DIGIT*;
-FLOATLIT: DIGIT+(FRAC|FRAC? EXPONENT);
-STRINGLIT: ["] (ESCAPE_SEQUENCE | ~('\\' | '"' | '\r' | '\n'))* ["] { self.text = self.text.replace("\"","") };
+STRINGLIT: ["] (ESCAPE_SEQUENCE | ~('\\' | '"' | '\r' | '\n'))* ["] { self.text = self.text[1:-1] };
 fragment ESCAPE_SEQUENCE: '\\' [btnfr"'\\];
 
 // 5. Whitespace & Comments
@@ -102,5 +102,17 @@ LINE_COMMENT: '//' ~[\r\n]* -> skip;
 WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs
 
 ERROR_CHAR: .;
-ILLEGAL_ESCAPE:.;
-UNCLOSE_STRING:.;
+ILLEGAL_ESCAPE
+    : '"' (ESCAPE_SEQUENCE | ~('\\' | '"' | '\n' | '\r'))*
+      '\\' ~[btnfr"'\\]
+      {
+          raise IllegalEscape(self.text[1:])
+      }
+    ;
+UNCLOSE_STRING
+    : '"' (ESCAPE_SEQUENCE | ~('\\' | '"' | '\n' | '\r'))*
+      ( '\n' | '\r' | EOF )
+      {
+          raise UncloseString(self.text[1:-1])
+      }
+    ;
