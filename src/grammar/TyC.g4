@@ -24,9 +24,73 @@ options{
 	language=Python3;
 }
 
-// TODO: Define grammar rules here
-program: EOF;
+// ------------ PARSER START----------------------------
+program: decl_list EOF;
 
+//1. --- DECLARATION ---
+decl_list
+    : declaration decl_list
+    | /* empty */
+    ;
+
+//2. --- STRUCT ---
+
+struct_decl
+    : STRUCT IDENTIFIER '{' struct_member_list '}' ';'
+    ;
+struct_member_list
+    : struct_member struct_member_list
+    | /* empty */
+    ;
+struct_member
+    : type IDENTIFIER ';'
+    ;
+
+//3. --- FUNCTION ---
+func_decl
+    : opt_return_type IDENTIFIER '(' opt_param_list ')' block
+    ;
+opt_return_type
+    : return_type
+    | /* empty */
+    ;
+return_type
+    : type
+    | VOID
+    ;
+
+//4. --- PARAMETER ---
+opt_param_list
+    : param_list
+    | /* empty */
+    ;
+param_list
+    : param
+    | param ',' param_list
+    ;
+param
+    : type IDENTIFIER
+    ;
+
+//5. --- TYPE ---
+//6. --- BLOCK & STAMENT ---
+//7. --- VARIABLE DECLARATION ---
+//8. --- ASSIGNMENT ---
+//9. --- IF ---
+//10. --- WHILE / FOR ---
+//11. --- SWITCH ---
+//12. --- JUMP STATEMENTS ---
+//13. --- EXPRESSION (BNF + PRECEDENCE) ---
+//14. --- PRIMARY / CALL / ACCESS ---
+//15. --- LITERAL ---
+
+
+
+
+
+// ------------ PARSER END----------------------------
+
+// ------------ LEXER START----------------------------
 // 1. --- KEYWORDS ---
 AUTO     : 'auto';
 BREAK    : 'break';
@@ -98,6 +162,7 @@ fragment ESCAPE_SEQUENCE: '\\' [btnfr"'\\];
 // Comments: Block trước, Line sau
 BLOCK_COMMENT: '/*' .*? '*/' -> skip;
 LINE_COMMENT: '//' ~[\r\n]* -> skip;
+// ------------ LEXER END----------------------------
 
 WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs
 
