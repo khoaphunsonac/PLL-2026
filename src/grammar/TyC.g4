@@ -28,62 +28,136 @@ options{
 program: decl_list EOF;
 
 //1. --- DECLARATION ---
-decl_list
-    : declaration decl_list
-    | /* empty */
-    ;
+decl_list: declaration decl_list | ;
+declaration: variable_decl | func_decl | struct_decl ;
+variable_decl: AUTO IDENTIFIER opt_init SEMI | type IDENTIFIER opt_init SEMI ;
 
 //2. --- STRUCT ---
 
 struct_decl
-    : STRUCT IDENTIFIER '{' struct_member_list '}' ';'
-    ;
+    : STRUCT IDENTIFIER LBRACE struct_member_list RBRACE SEMI ;
 struct_member_list
-    : struct_member struct_member_list
-    | /* empty */
-    ;
+    : struct_member struct_member_list | ;
 struct_member
-    : type IDENTIFIER ';'
-    ;
+    : type IDENTIFIER SEMI ;
 
 //3. --- FUNCTION ---
-func_decl
-    : opt_return_type IDENTIFIER '(' opt_param_list ')' block
-    ;
-opt_return_type
-    : return_type
-    | /* empty */
-    ;
-return_type
-    : type
-    | VOID
-    ;
+func_decl: opt_return_type IDENTIFIER LPAREN opt_param_list RPAREN block ;
+opt_return_type: return_type | ;
+return_type: type | VOID ;
 
 //4. --- PARAMETER ---
-opt_param_list
-    : param_list
-    | /* empty */
-    ;
-param_list
-    : param
-    | param ',' param_list
-    ;
-param
-    : type IDENTIFIER
-    ;
+opt_param_list: param_list | ;
+param_list: param | param COMMA param_list;
+param: type IDENTIFIER;
 
 //5. --- TYPE ---
+type: INT | FLOAT | STRING | IDENTIFIER;
 //6. --- BLOCK & STAMENT ---
-//7. --- VARIABLE DECLARATION ---
-//8. --- ASSIGNMENT ---
-//9. --- IF ---
-//10. --- WHILE / FOR ---
-//11. --- SWITCH ---
-//12. --- JUMP STATEMENTS ---
-//13. --- EXPRESSION (BNF + PRECEDENCE) ---
-//14. --- PRIMARY / CALL / ACCESS ---
-//15. --- LITERAL ---
+block: LBRACE stmt_list RBRACE; 
+stmt_list: stmt stmt_list | ; 
+stmt: var_decl_stmt
+    | assign_stmt
+    | if_stmt
+    | while_stmt
+    | for_stmt
+    | switch_stmt
+    | break_stmt
+    | continue_stmt
+    | return_stmt
+    | expr_stmt
+    | block
+    ;
 
+//7. --- VARIABLE DECLARATION ---
+var_decl_stmt: AUTO IDENTIFIER opt_init SEMI | type IDENTIFIER opt_init SEMI ;
+opt_init: ASSIGNMENT expr | ;
+
+//8. --- ASSIGNMENT ---
+assign_stmt: lhs ASSIGNMENT expr SEMI ;
+lhs: IDENTIFIER | members_access; 
+//9. --- IF ---
+if_stmt: IF LPAREN expr RPAREN stmt opt_else ;
+opt_else: ELSE stmt | ;
+
+//10. --- WHILE / FOR ---
+while_stmt: WHILE LPAREN expr RPAREN stmt ;
+for_stmt: FOR LPAREN opt_for_init ';' opt_expr ';' opt_for_update RPAREN stmt ;
+opt_for_init: for_init | ;
+for_init: var_decl_stmt | assign_stmt ;
+opt_for_update: for_update | ;
+for_update: assign_stmt | expr ;
+//11. --- SWITCH ---
+switch_stmt: SWITCH LPAREN expr RPAREN LBRACE case_list opt_default RBRACE  ;
+case_list: case_stmt case_list| ;
+case_stmt: CASE INTLIT COLON stmt_list;
+opt_default: default_stmt| ;
+default_stmt: DEFAULT COLON stmt_list;
+
+//12. --- JUMP STATEMENTS ---
+break_stmt: BREAK SEMI;
+continue_stmt: CONTINUE SEMI;
+return_stmt: RETURN opt_expr SEMI;
+//13. --- EXPRESSION (BNF + PRECEDENCE) ---
+expr_stmt: expr SEMI ;
+expr: logical_or_expr ;
+logical_or_expr: logical_or_expr OR logical_and_expr | logical_and_expr ;
+logical_and_expr: logical_and_expr AND equality_expr | equality_expr ;
+equality_expr
+    : equality_expr (EQUAL | NOT_EQUAL) relational_expr
+    | relational_expr
+    ;
+
+relational_expr
+    : relational_expr (LT | LE | GT | GE) additive_expr
+    | additive_expr
+    ;
+
+additive_expr
+    : additive_expr (ADD | SUB) multiplicative_expr
+    | multiplicative_expr
+    ;
+
+multiplicative_expr
+    : multiplicative_expr (MUL | DIV | MOD) unary_expr
+    | unary_expr
+    ;
+
+unary_expr
+    : (NOT | SUB) unary_expr
+    | postfix_expr
+    ;
+
+postfix_expr
+    : postfix_expr INCREMENT
+    | postfix_expr DECREMENT
+    | primary_expr
+    ;
+
+primary_expr
+    : literal
+    | IDENTIFIER
+    | members_access
+    | func_call
+    | LPAREN expr RPAREN
+    ;
+
+opt_expr
+    : expr
+    | /* empty */
+    ;
+
+//14. --- PRIMARY / CALL / ACCESS ---
+func_call: IDENTIFIER LPAREN opt_arg_list RPAREN;
+opt_arg_list: arg_list| ;
+arg_list: expr | expr COMMA arg_list ;
+members_access: IDENTIFIER DOT IDENTIFIER | members_access DOT IDENTIFIER ;
+//15. --- LITERAL ---
+literal
+    : INTLIT
+    | FLOATLIT
+    | STRINGLIT
+    ;
 
 
 
