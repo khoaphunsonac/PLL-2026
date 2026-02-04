@@ -224,12 +224,12 @@ COMMA       : ',';
 COLON       : ':';
 
 // 4. Identifiers & Literals 
-IDENTIFIER: [a-zA-Z_'][a-zA-Z0-9_']*;
+IDENTIFIER: [a-zA-Z_][a-zA-Z0-9_]*;
 fragment DIGIT: [0-9];
 fragment FRAC: '.'DIGIT*;
 fragment EXPONENT: [Ee]'-'?DIGIT+;
 FLOATLIT: DIGIT* (FRAC|FRAC? EXPONENT);
-INTLIT: '0' | [1-9] DIGIT*;
+INTLIT: DIGIT+;
 STRINGLIT: ["] (ESCAPE_SEQUENCE | ~('\\' | '"' | '\r' | '\n'))* ["] { self.text = self.text[1:-1] };
 fragment ESCAPE_SEQUENCE: '\\' [btnfr"'\\];
 
