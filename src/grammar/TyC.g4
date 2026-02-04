@@ -82,11 +82,13 @@ opt_else: ELSE stmt | ;
 
 //10. --- WHILE / FOR ---
 while_stmt: WHILE LPAREN expr RPAREN stmt ;
-for_stmt: FOR LPAREN opt_for_init ';' opt_expr ';' opt_for_update RPAREN stmt ;
+for_stmt: FOR LPAREN opt_for_init SEMI opt_expr SEMI opt_for_update RPAREN stmt ;
 opt_for_init: for_init | ;
-for_init: var_decl_stmt | assign_stmt ;
+for_init:     AUTO IDENTIFIER opt_init
+            | type IDENTIFIER opt_init
+            | lhs ASSIGNMENT expr ;
 opt_for_update: for_update | ;
-for_update: assign_stmt | expr ;
+for_update: lhs ASSIGNMENT expr | expr ;
 //11. --- SWITCH ---
 switch_stmt: SWITCH LPAREN expr RPAREN LBRACE case_list opt_default RBRACE  ;
 case_list: case_stmt case_list| ;
@@ -124,7 +126,7 @@ multiplicative_expr
     ;
 
 unary_expr
-    : (NOT | SUB) unary_expr
+    : (NOT | SUB | INCREMENT | DECREMENT) unary_expr
     | postfix_expr
     ;
 
