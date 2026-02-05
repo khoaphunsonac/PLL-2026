@@ -40,6 +40,14 @@ struct_member_list
     : struct_member struct_member_list | ;
 struct_member
     : type IDENTIFIER SEMI ;
+struct_literal
+    : LBRACE struct_literal_elements RBRACE
+    | LBRACE RBRACE
+    ;
+struct_literal_elements
+    : expr
+    | expr COMMA struct_literal_elements
+    ;
 
 //3. --- FUNCTION ---
 func_decl: opt_return_type IDENTIFIER LPAREN opt_param_list RPAREN block ;
@@ -90,11 +98,20 @@ for_init:     AUTO IDENTIFIER opt_init
 opt_for_update: for_update | ;
 for_update: lhs ASSIGNMENT expr | expr ;
 //11. --- SWITCH ---
-switch_stmt: SWITCH LPAREN expr RPAREN LBRACE case_list opt_default RBRACE  ;
-case_list: case_stmt case_list| ;
-case_stmt: CASE INTLIT COLON stmt_list;
-opt_default: default_stmt| ;
-default_stmt: DEFAULT COLON stmt_list;
+switch_stmt: SWITCH LPAREN expr RPAREN LBRACE switch_clause_list RBRACE ;
+switch_clause_list
+    : switch_clause switch_clause_list
+    | ;
+switch_clause
+    : case_clause
+    | default_clause
+    ;
+case_clause
+    : CASE expr COLON stmt_list ;
+default_clause
+    : DEFAULT COLON stmt_list ;
+
+
 
 //12. --- JUMP STATEMENTS ---
 break_stmt: BREAK SEMI;
@@ -141,8 +158,10 @@ primary_expr
     | IDENTIFIER
     | members_access
     | func_call
+    | struct_literal
     | LPAREN expr RPAREN
     ;
+
 
 opt_expr
     : expr
