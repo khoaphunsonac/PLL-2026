@@ -236,8 +236,6 @@ LPAREN      : '(';
 RPAREN      : ')';
 LBRACE      : '{';
 RBRACE      : '}';
-LBRACK      : '[';
-RBRACK      : ']';
 SEMI        : ';';
 COMMA       : ',';
 COLON       : ':';
@@ -245,34 +243,40 @@ COLON       : ':';
 // 4. Identifiers & Literals 
 IDENTIFIER: [a-zA-Z_][a-zA-Z0-9_]*;
 fragment DIGIT: [0-9];
-fragment FRAC: '.'DIGIT*;
-fragment EXPONENT: [Ee]'-'?DIGIT+;
-FLOATLIT: DIGIT* (FRAC|FRAC? EXPONENT);
+fragment FRAC: DOT DIGIT*;
+fragment EXPONENT: [Ee] [+\-]? DIGIT+;
+FLOATLIT
+    : DIGIT+ DOT DIGIT* EXPONENT?
+    | DOT DIGIT+ EXPONENT?
+    | DIGIT+ EXPONENT
+    ;
 INTLIT: DIGIT+;
-STRINGLIT: ["] (ESCAPE_SEQUENCE | ~('\\' | '"' | '\r' | '\n'))* ["] { self.text = self.text[1:-1] };
-fragment ESCAPE_SEQUENCE: '\\' [btnfr"'\\];
+fragment ESCAPE_SEQUENCE: '\\' [btnfr"\\];
+ILLEGAL_ESCAPE
+    : '"' (ESCAPE_SEQUENCE | ~["\\\r\n])*
+      '\\' ~[btnfr"'\\]
+    ;
+
+UNCLOSE_STRING
+    : '"' (ESCAPE_SEQUENCE | ~["\\\r\n])*
+      ( '\r' | '\n' | EOF )
+    ;
+STRINGLIT
+    : '"' (ESCAPE_SEQUENCE | ~["\\\r\n])* '"'
+      {
+          import codecs
+          self.text = codecs.decode(self.text[1:-1], "unicode_escape")
+      }
+    ;
 
 // 5. Whitespace & Comments
 
 // Comments: Block trước, Line sau
 BLOCK_COMMENT: '/*' .*? '*/' -> skip;
 LINE_COMMENT: '//' ~[\r\n]* -> skip;
-// ------------ LEXER END----------------------------
+
 
 WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs
 
 ERROR_CHAR: .;
-ILLEGAL_ESCAPE
-    : '"' (ESCAPE_SEQUENCE | ~('\\' | '"' | '\n' | '\r'))*
-      '\\' ~[btnfr"'\\]
-      {
-          raise IllegalEscape(self.text[1:])
-      }
-    ;
-UNCLOSE_STRING
-    : '"' (ESCAPE_SEQUENCE | ~('\\' | '"' | '\n' | '\r'))*
-      ( '\n' | '\r' | EOF )
-      {
-          raise UncloseString(self.text[1:-1])
-      }
-    ;
+// ------------ LEXER END----------------------------
