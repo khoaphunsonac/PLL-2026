@@ -1,424 +1,1798 @@
-import pytest
-from tests.utils import Parser
+from utils import Parser
 
 
-# =============================
-# 001–004 Empty & Basic
-# =============================
-def test_001(): assert Parser("").parse() == "success"
+def test_001():
+    source = """
+void main() {
+    printString("Hello, World!");
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
 
-def test_002(): assert Parser("void main() {}").parse() == "success"
+def test_002():
+    source = """
+int add(int x, int y) {
+    return x + y;
+}
+
+int multiply(int x, int y) {
+    return x * y;
+}
+
+void main() {
+    auto a = readInt();
+    auto b = readInt();
+    
+    auto sum = add(a, b);
+    auto product = multiply(a, b);
+    
+    printInt(sum);
+    printInt(product);
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
 
 def test_003():
-    src = "void f(){} struct A{}; void main(){}"
-    assert Parser(src).parse() == "success"
-
-def test_004():
-    src = "//c\n/*b*/\nvoid main(){}"
-    assert Parser(src).parse() == "success"
-# =============================
-# 005–009 Struct
-# =============================
-def test_005(): assert Parser("struct A{}; void main(){}").parse()=="success"
-
-def test_006():
-    src="struct B{int x;}; struct A{B b;}; void main(){}"
-    assert Parser(src).parse()=="success"
-
-def test_007():
-    src="struct A{A a;}; void main(){}"
-    assert Parser(src).parse()=="success"
-
-def test_008():
-    src="struct A{auto x;}; void main(){}"
-    assert Parser(src).parse().startswith("Error")
-
-def test_009():
-    src="struct A{int x=1;}; void main(){}"
-    assert Parser(src).parse().startswith("Error")
-# =============================
-# 010–018 Function
-# =============================
-def test_010(): assert Parser("int f(){return 1;}").parse()=="success"
-
-def test_011(): assert Parser("int f(int a,float b){return 1;}").parse()=="success"
-
-def test_012(): assert Parser("f(){return 1;}").parse()=="success"
-
-def test_013():
-    src="struct A{int x;}; A f(){A a; return a;}"
-    assert Parser(src).parse()=="success"
-
-def test_014(): assert Parser("auto f(){return 1;}").parse().startswith("Error")
-
-def test_015(): assert Parser("int f(auto a){return 1;}").parse().startswith("Error")
-
-def test_016(): assert Parser("int f(int a,){return 1;}").parse().startswith("Error")
-
-def test_017(): assert Parser("int f();").parse().startswith("Error")
-
-def test_018(): assert Parser("void f(){} void main(){}").parse()=="success"
-# =============================
-# 019–024 Variables
-# =============================
-def test_019(): assert Parser("void main(){int x;}").parse()=="success"
-
-def test_020(): assert Parser("void main(){int x=1;}").parse()=="success"
-
-def test_021(): assert Parser("void main(){auto x=1;}").parse()=="success"
-
-def test_022():
-    src="struct A{int x;}; void main(){A a={1};}"
-    assert Parser(src).parse()=="success"
-
-def test_023():
-    src="struct A{int x;}; void main(){A a={{1}};}"
-    assert Parser(src).parse()=="success"
-
-def test_024(): assert Parser("int x;").parse().startswith("Error")
-
-# =============================
-# 025–030 Expressions — arithmetic
-# =============================
-def test_025():
-    assert Parser("void main(){int x; x = -1;}").parse() == "success"
-
-def test_026():
-    assert Parser("void main(){int x; x = + - + 1;}").parse() == "success"
-
-def test_027():
-    assert Parser("void main(){int x; x = (1 + 2) * 3;}").parse() == "success"
-
-def test_028():
-    assert Parser("void main(){int x; x = 1 + 2 * 3 - 4 / 5 % 6;}").parse() == "success"
-
-def test_029():
-    assert Parser("void main(){int x; x = 1 + 2 + 3 + 4 + 5;}").parse() == "success"
-
-def test_030():
-    assert Parser("void main(){int x; x = 1 + ;}").parse().startswith("Error")
-# =============================
-# 031–032 Relational
-# =============================
-def test_031():
-    assert Parser("void main(){int x; x = 1 < 2 > 3 <= 4 >= 5 == 6 != 7;}").parse() == "success"
-
-def test_032():
-    assert Parser("void main(){int x; x = 1 < 2 < 3;}").parse() == "success"
-# =============================
-# 033–037 Logical
-# =============================
-def test_033():
-    assert Parser("void main(){int x; x = 1 && 2;}").parse() == "success"
-
-def test_034():
-    assert Parser("void main(){int x; x = 1 || 2;}").parse() == "success"
-
-def test_035():
-    assert Parser("void main(){int x; x = !1;}").parse() == "success"
-
-def test_036():
-    assert Parser("void main(){int x; x = 1 || 2 && 3;}").parse() == "success"
-
-def test_037():
-    assert Parser("void main(){int x; x = (1 < 2) && (3 > 4);}").parse() == "success"
-# =============================
-# 038 Increment / Decrement
-# =============================
-def test_038():
-    assert Parser("void main(){int x; x++; ++x; x--; --x;}").parse() == "success"
-# =============================
-# 039–041 Assignment
-# =============================
-def test_039():
-    assert Parser("void main(){int a; int b; a = b = 1;}").parse() == "success"
-
-def test_040():
-    assert Parser("void main(){int a; int b; a = (b = 1);}").parse() == "success"
-
-def test_041():
-    src = "struct A{int x;}; void main(){A a; a.x = 1;}"
-    assert Parser(src).parse() == "success"
-# =============================
-# 042–046 Member Access
-# =============================
-def test_042():
-    assert Parser("void main(){int x; x = a.b;}").parse() == "success"
-
-def test_043():
-    assert Parser("void main(){int x; x = a.b.c;}").parse() == "success"
-
-def test_044():
-    assert Parser("void main(){a.b++;}").parse() == "success"
-
-def test_045():
-    assert Parser("void main(){int x; x = a.b + 1;}").parse() == "success"
-
-def test_046():
-    assert Parser("void main(){int x; x = f().x;}").parse() == "success"
-# =============================
-# 047–048 Function Calls
-# =============================
-def test_047():
-    assert Parser("void main(){f(); g(1,2,f(3));}").parse() == "success"
-
-def test_048():
-    assert Parser("void main(){struct A{int x;}; f({1});}").parse() == "success"
-# =============================
-# 049–050 Precedence
-# =============================
-def test_049():
-    assert Parser("void main(){int x; x = 1 + 2 * 3 < 4 && 5;}").parse() == "success"
-
-def test_050():
-    assert Parser("void main(){int x; x = f(1) + g(2) * h(3);}").parse() == "success"
-# =============================
-# 051–052 If
-# =============================
-def test_051():
-    assert Parser("void main(){if(1) if(2){} else{} }").parse() == "success"
-
-def test_052():
-    assert Parser("void main(){if(1){} else if(2){} else{} }").parse() == "success"
-# =============================
-# 053 While
-# =============================
-def test_053():
-    assert Parser("void main(){while(1){} while(2){while(3){}}}").parse() == "success"
-# =============================
-# 054–062 For
-# =============================
-def test_054():
-    assert Parser("void main(){for(int i=0;i<10;i++){} }").parse() == "success"
-
-def test_055():
-    assert Parser("void main(){int i; for(i=0;i<10;i++){} }").parse() == "success"
-
-def test_056():
-    assert Parser("void main(){for(;i<10;i++){} }").parse() == "success"
-
-def test_057():
-    assert Parser("void main(){for(;;){} }").parse() == "success"
-
-def test_058():
-    assert Parser("void main(){for(int i=0;;){} }").parse() == "success"
-
-def test_059():
-    assert Parser("void main(){for(;i<10;){} }").parse() == "success"
-
-def test_060():
-    assert Parser("void main(){for(;;i++){} }").parse() == "success"
-
-def test_061():
-    assert Parser("void main(){for(i=0;i<10;i++){} }").parse() == "success"
-
-def test_062():
-    assert Parser("void main(){for(3;1;){} }").parse().startswith("Error")
-# =============================
-# 063–069 Switch
-# =============================
-def test_063():
-    assert Parser("void main(){switch(1){} }").parse() == "success"
-
-def test_064():
-    assert Parser("void main(){switch(1){case 1: break;} }").parse() == "success"
-
-def test_065():
-    assert Parser("void main(){switch(1){case 1: break; default: break;} }").parse() == "success"
-
-def test_066():
-    assert Parser("void main(){switch(1){case 1+2: break;} }").parse() == "success"
-
-def test_067():
-    assert Parser("void main(){switch(1){default: break;} }").parse() == "success"
-
-def test_068():
-    assert Parser("void main(){switch(1){case 1 break;} }").parse().startswith("Error")
-
-def test_069():
-    assert Parser("void main(){switch(1){default: break; default: break;} }").parse().startswith("Error")
-# =============================
-# 070–071 break/continue/return
-# =============================
-def test_070():
-    assert Parser("void main(){while(1){break; continue;} }").parse() == "success"
-
-def test_071():
-    assert Parser("void main(){return; return 1;}").parse() == "success"
-# =============================
-# 072–073 Blocks
-# =============================
-def test_072():
-    assert Parser("void main(){{{{}}}}").parse() == "success"
-
-def test_073():
-    assert Parser("void main(){} {}").parse() == "success"
-# =============================
-# 074–075 Expression statements
-# =============================
-def test_074():
-    assert Parser("void main(){f();}").parse() == "success"
-
-def test_075():
-    assert Parser("void main(){int x; x++;}").parse() == "success"
-# =============================
-# 076–080 Unsupported / Errors
-# =============================
-def test_076():
-    assert Parser("void main(){;}").parse().startswith("Error")
-
-def test_077():
-    assert Parser("void main(){int arr[10];}").parse().startswith("Error")
-
-def test_078():
-    assert Parser("void main(){int a,b,c;}").parse().startswith("Error")
-
-def test_079():
-    assert Parser("void main(){void x;}").parse().startswith("Error")
-
-def test_080():
-    assert Parser("void main(){struct A{int x;};}").parse().startswith("Error")
-
-# =============================
-# 081–089 Tricky / Edge cases
-# =============================
-# 081 Multiple default in switch (reject)
-def test_081():
-    src = "void main(){switch(1){default: break; default: break;}}"
-    assert Parser(src).parse().startswith("Error")
-
-
-# 082 for(;; missing ) (reject)
-def test_082():
-    src = "void main(){for(;;{} }"
-    assert Parser(src).parse().startswith("Error")
-
-
-# 083 relational on LHS of assignment (parser may accept)
-def test_083():
-    src = "void main(){int x; (1<2) = 3;}"
-    assert Parser(src).parse() == "success"
-
-
-# 084 assignment to literal (parser may accept)
-def test_084():
-    src = "void main(){ 1 = 2; }"
-    assert Parser(src).parse() == "success"
-
-
-# 085 unmatched parentheses (reject)
-def test_085():
-    src = "void main(){ int x; x = (1 + 2; }"
-    assert Parser(src).parse().startswith("Error")
-
-
-# 086 case with identifier or float (parser may accept)
-def test_086():
-    src = "void main(){switch(1){case x: break; case 1.5: break;}}"
-    assert Parser(src).parse() == "success"
-
-
-# 087 struct literal on LHS of assignment (parser may accept)
-def test_087():
-    src = "void main(){ {1} = a; }"
-    assert Parser(src).parse() == "success"
-
-
-# 088 for init with invalid expression e.g. i || 1 (reject)
-def test_088():
-    src = "void main(){for(i || 1; i<10; i++){} }"
-    assert Parser(src).parse().startswith("Error")
-
-
-# 089 unmatched brace (reject)
-def test_089():
-    src = "void main(){ if(1) { }"
-    assert Parser(src).parse().startswith("Error")
-# =============================
-# 090–100 Complex Programs & Edge
-# =============================
-# 090 Structs + functions (createPoint, distance style)
-def test_090():
-    src = """
-    struct Point { int x; int y; };
-    Point createPoint(int a, int b){
-        Point p = {a,b};
-        return p;
+    source = """
+void main() {
+    auto n = readInt();
+    auto i = 0;
+    
+    while (i < n) {
+        printInt(i);
+        ++i;
     }
-    void main(){}
-    """
-    assert Parser(src).parse() == "success"
-
-
-# 091 Full program: struct + control flow + switch + member
-def test_091():
-    src = """
-    struct A{int x;};
-    void main(){
-        A a = {1};
-        switch(a.x){
-            case 1: break;
-            default: break;
+    
+    for (auto j = 0; j < n; ++j) {
+        if (j % 2 == 0) {
+            printInt(j);
         }
     }
-    """
-    assert Parser(src).parse() == "success"
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
 
-
-# 092 Mixed types in one expression
-def test_092():
-    src = "void main(){int x; x = 1 + 2.0 * 3 < 4 && 5;}"
-    assert Parser(src).parse() == "success"
-
-
-# 093 Chained member and assignment
-def test_093():
-    src = "void main(){int x; a.b.c = d.e.f = 1;}"
-    assert Parser(src).parse() == "success"
-
-
-# 094 Float literal with member access
-def test_094():
-    src = "void main(){int x; x = 1.5.x;}"
-    assert Parser(src).parse() == "success"
-
-
-# 095 Nested calls and chained assignment
-def test_095():
-    src = "void main(){int x; x = f(g(1),h(2)) = 3;}"
-    assert Parser(src).parse() == "success"
-
-
-# 096 Nested struct literals as statement
-def test_096():
-    src = "void main(){ {{1,2},{3,4}}; }"
-    assert Parser(src).parse() == "success"
-
-
-# 097 Postfix on string literal
-def test_097():
-    src = 'void main(){ "abc"++; }'
-    assert Parser(src).parse() == "success"
-
-
-# 098 Prefix/postfix on function call
-def test_098():
-    src = "void main(){ ++f(); g()++; }"
-    assert Parser(src).parse() == "success"
-
-
-# 099 return f();;
-def test_099():
-    src = "void main(){ return f();; }"
-    assert Parser(src).parse().startswith("Error")
-
-
-# 100 Struct literal in comparison
-def test_100():
-    src = """
-    struct A{int x;};
-    void main(){
-        if({1} == {2}){}
+def test_004():
+    source = """
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    } else {
+        return n * factorial(n - 1);
     }
-    """
-    assert Parser(src).parse() == "success"
+}
+
+void main() {
+    auto num = readInt();
+    auto result = factorial(num);
+    printInt(result);
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_005():
+    source = """
+void main() {
+    // With auto and initialization
+    auto x = readInt();
+    auto y = readFloat();
+    auto name = readString();
+    
+    // With auto without initialization
+    auto sum;
+    sum = x + y;              // sum: float (inferred from first usage - assignment)
+    
+    // With explicit type and initialization
+    int count = 0;
+    float total = 0.0;
+    string greeting = "Hello, ";
+    
+    // With explicit type without initialization
+    int i;
+    float f;
+    i = readInt();            // assignment to int
+    f = readFloat();          // assignment to float
+    
+    printFloat(sum);
+    printString(greeting);
+    printString(name);
+    
+    // Note: String concatenation is NOT supported
+    // This is because + operator applies to int or float, not string
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+
+def test_006():
+    source ="""
+struct Point {
+    int x;
+    int y;
+};
+
+struct Person {
+    string name;
+    int age;
+    float height;
+};
+
+void main() {
+    // Struct variable declaration without initialization
+    Point p1;
+    p1.x = 10;
+    p1.y = 20;
+    
+    // Struct variable declaration with initialization
+    Point p2 = {30, 40};
+    
+    // Access and modify struct members
+    printInt(p2.x);
+    printInt(p2.y);
+    
+    // Struct assignment
+    p1 = p2;  // Copy all members
+    
+    // Person struct usage
+    Person person1 = {"John", 25, 1.75};
+    printString(person1.name);
+    printInt(person1.age);
+    printFloat(person1.height);
+    
+    // Modify struct members
+    person1.age = 26;
+    person1.height = 1.76;
+    
+    // Using struct with auto
+    auto p3 = p2;  // p3: Point (inferred from assignment)
+    printInt(p3.x);
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_007():
+    source = """
+void main() {
+"""
+    expected = "Error on line 3 col 0: <EOF>"
+    assert Parser(source).parse() == expected
+
+def test_008():
+    source = """
+void main {}
+"""
+    expected = "Error on line 2 col 10: {"
+    assert Parser(source).parse() == expected
+
+def test_009():
+    source = """
+void main () {
+    return 1;
+    return 1.0;
+    return "votien";
+    return {1, 2, 1.0}; // struct lit
+    return {};
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_010():
+    source = """
+void main () {
+    return a = b = 3;
+    return (a = b) + 7;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_011():
+    source = """
+void main () {
+    return 1 || 2 || 3;
+    return a = "votien" || 3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_012():
+    source = """
+void main () {
+    return 1 && 2 && 3;
+    return 1.0 || "votien" && 3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_013():
+    source = """
+void main () {
+    return 1 == 2 != 3;
+    return 1.0 && "votien" == 3 && 2 != 2;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+
+def test_014():
+    source = """
+void main () {
+    return 1 >= 2 < 3 <= 4 > 5;
+    return 1.0 == "votien" >= 3 != 2 > 2;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_015():
+    source = """
+void main () {
+    return 1 + 2 - 3;
+    return 1 + 2 > 1 - 3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_016():
+    source = """
+void main () {
+    return 1 * 2 / 3 % 4;
+    return 1 + 2 * 3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_017():
+    source = """
+void main () {
+    return a.b.c.d.g.h;
+    return a * a.b.c;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_018():
+    source = """
+void main () {
+    return !!-+!-+a;
+    return !-+a.b.c;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_019():
+    source = """
+void main () {
+    return ++--++a;
+    return !++a;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_020():
+    source = """
+void main () {
+    return ++!a;
+}
+"""
+    expected = "Error on line 3 col 13: !"
+    assert Parser(source).parse() == expected
+
+def test_021():
+    source = """
+void main () {
+    return +++a;
+}
+"""
+    expected = "Error on line 3 col 13: +"
+    assert Parser(source).parse() == expected
+
+def test_022():
+    source = """
+void main () {
+    return a++--++--;
+    return ++--++--a++--++--;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_023():
+    source = """
+void main () {
+    return ++(+a) * (a / (c));
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_024():
+    source = """
+void main () {
+    return {1+3, "s"++};
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_025():
+    source = """
+void main () {
+    return foo() + foo(1) + foo(1*2++, 1 && 2, foo());
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_026():
+    source = """
+void main () {
+    foo(;
+}
+"""
+    expected = "Error on line 3 col 8: ;"
+    assert Parser(source).parse() == expected
+
+def test_027():
+    source = """
+void main () {
+    foo(a b);
+}
+"""
+    expected = "Error on line 3 col 10: b"
+    assert Parser(source).parse() == expected
+
+def test_028():
+    source = """
+void main () {
+    a.foo();
+}
+"""
+    expected = "Error on line 3 col 9: ("
+    assert Parser(source).parse() == expected
+
+def test_029():
+    source = """
+void main () {
+    foo.a.b;
+    ++a.b;
+    a.b++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_030():
+    source = """
+void main () {
+    +a++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_031():
+    source = """
+void main () {
+    int a = 1;
+    int a;
+    float b = 1;
+    string b = 1 + 2 / 3;
+    auto b = 1;
+    auto b;
+    ID b = foo();
+    ID b;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_032():
+    source = """
+void main () {
+    void a = 1;
+}
+"""
+    expected = "Error on line 3 col 4: void"
+    assert Parser(source).parse() == expected
+
+def test_033():
+    source = """
+void main () {
+    void a;
+}
+"""
+    expected = "Error on line 3 col 4: void"
+    assert Parser(source).parse() == expected
+
+def test_034():
+    source = """
+void main () {
+    int a, b;
+}
+"""
+    expected = "Error on line 3 col 9: ,"
+    assert Parser(source).parse() == expected
+
+def test_035():
+    source = """
+void main () {
+    int a = e = 3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_036():
+    source = """
+void main () {
+    int a
+}
+"""
+    expected = "Error on line 4 col 0: }"
+    assert Parser(source).parse() == expected
+
+def test_037():
+    source = """
+void main () {
+    a = 2;
+    a.b = foo() + a.b * 3;
+    a.b.c.d = 1;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_038():
+    source = """
+void main () {
+    ++a = 1;
+}
+"""
+    expected = "Error on line 3 col 8: ="
+    assert Parser(source).parse() == expected
+
+def test_039():
+    source = """
+void main () {
+    foo() = 1;
+}
+"""
+    expected = "Error on line 3 col 10: ="
+    assert Parser(source).parse() == expected
+
+def test_040():
+    source = """
+void main () {
+    if (1 + 2) continue;
+    else break;
+
+    if (a.b.c) {if (c.a) return;}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_041():
+    source = """
+void main () {
+    if (1);
+}
+"""
+    expected = "Error on line 3 col 10: ;"
+    assert Parser(source).parse() == expected
+
+def test_042():
+    source = """
+void main () {
+    if (1) {} else;
+}
+"""
+    expected = "Error on line 3 col 18: ;"
+    assert Parser(source).parse() == expected
+
+def test_042():
+    source = """
+void main () {
+    if () {}
+}
+"""
+    expected = "Error on line 3 col 8: )"
+    assert Parser(source).parse() == expected
+
+def test_043():
+    source = """
+void main () {
+    int if;
+}
+"""
+    expected = "Error on line 3 col 8: if"
+    assert Parser(source).parse() == expected
+
+def test_044():
+    source = """
+void main () {
+    if (a) {} else if (2) {} else if (2) {} else {}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_045():
+    source = """
+void main () {
+    while(1 > 2) continue;
+    while(1 > 2) {return; break;}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_046():
+    source = """
+void main () {
+    while() continue;
+}
+"""
+    expected = "Error on line 3 col 10: )"
+    assert Parser(source).parse() == expected
+
+def test_047():
+    source = """
+void main () {
+    return ;
+    return 1 +2 *++3;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_048():
+    source = """
+ return ;
+"""
+    expected = "Error on line 2 col 1: return"
+    assert Parser(source).parse() == expected
+
+def test_048():
+    source = """
+void main () {
+    1 +2 -++3+a.b.c;
+    ;
+}
+"""
+    expected = "Error on line 4 col 4: ;"
+    assert Parser(source).parse() == expected
+
+def test_049():
+    source = """
+void main () {
+    {{{}}}
+    {return; {break;}}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_050():
+    source = """
+void main () {
+   {retrun; };
+}
+"""
+    expected = "Error on line 3 col 13: ;"
+    assert Parser(source).parse() == expected
+
+def test_051():
+    source = """
+void main () {
+   for(int a = 1 + 2; i > 2; a++) continue;
+   for(a = a.b = 1; ; --a) a++;
+   for(auto a = 1; i * 2; a = 2) {return ;}
+   for(; ; ) {}
+   for({1,2}.a = 1; ; (a+2).b = 2) a++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_052():
+    source = """
+void main () {
+   for(break; ; ) continue;
+}
+"""
+    expected = "Error on line 3 col 7: break"
+    assert Parser(source).parse() == expected
+
+def test_053():
+    source = """
+void main () {
+   for(a=2;; ; ) continue;
+}
+"""
+    expected = "Error on line 3 col 13: ;"
+    assert Parser(source).parse() == expected
+
+def test_054():
+    source = """
+void main () {
+   for(; break ; ) continue;
+}
+"""
+    expected = "Error on line 3 col 9: break"
+    assert Parser(source).parse() == expected
+
+def test_055():
+    source = """
+void main () {
+   for(; break ; ) continue;
+}
+"""
+    expected = "Error on line 3 col 9: break"
+    assert Parser(source).parse() == expected
+
+def test_056():
+    source = """
+void main () {
+   for(a.b=2; ; ) continue;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_057():
+    source = """
+void main () {
+   for(; ; -a) continue;
+}
+"""
+    expected = "Error on line 3 col 11: -"
+    assert Parser(source).parse() == expected
+
+def test_058():
+    source = """
+void main () {
+   for(; ; a.b=a.c.c=c()) continue;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_059():
+    source = """
+void main () {
+   for(; ;);
+}
+"""
+    expected = "Error on line 3 col 11: ;"
+    assert Parser(source).parse() == expected
+
+def test_060():
+    source = """
+void main () {
+   for(; ;);
+}
+"""
+    expected = "Error on line 3 col 11: ;"
+    assert Parser(source).parse() == expected
+
+def test_061():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) {
+        case 1:
+            printInt(1);
+        case 2:
+            printInt(2);
+        default:
+            printInt(0);
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_062():
+    source = """
+void main () {
+    int x = 10;
+    switch (x) {
+        case 1:
+            printInt(1);
+        case 2:
+            printInt(2);
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_063():
+    source = """
+void main () {
+    switch (1) {
+        case :
+            printInt(1);
+    }
+}
+"""
+    expected = "Error on line 4 col 13: :"
+    assert Parser(source).parse() == expected
+
+def test_064():
+    source = """
+void main () {
+    switch () {
+        case 1:
+            printInt(1);
+    }
+}
+"""
+    expected = "Error on line 3 col 12: )"
+    assert Parser(source).parse() == expected
+
+def test_065():
+    source = """
+void main () {
+    switch (1) {
+        default
+            printInt(0);
+    }
+}
+"""
+    expected = "Error on line 5 col 12: printInt"
+    assert Parser(source).parse() == expected
+
+def test_066():
+    source = """
+void main () {
+    switch (1) {
+        case 1 + 2 * "s":
+            printInt(0);
+            return ;
+            break;
+        default:
+            printInt(0);
+            {if(1){}}
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_067():
+    source = """
+void main () {
+    switch (1 *3 / 4) {
+        default:
+            1;
+        case 2:
+             2;
+    }
+
+    switch (1 *3 / 4) {
+        case 3:1;
+        default:1;
+        case 2: 2;
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_068():
+    source = """
+AAAA main (int a, int b) {return;}
+void main3 () {}
+ID main2 (int a) {return;}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_069():
+    source = """
+AAAA main (int a, b) {return;}
+"""
+    expected = "Error on line 2 col 19: )"
+    assert Parser(source).parse() == expected
+
+def test_070():
+    source = """
+AAAA main (int a) continue;
+"""
+    expected = "Error on line 2 col 18: continue"
+    assert Parser(source).parse() == expected
+
+def test_071():
+    source = """
+AAAA main (int a);
+"""
+    expected = "Error on line 2 col 17: ;"
+    assert Parser(source).parse() == expected
+
+def test_072():
+    source = """
+AAAA main (auto a){}
+"""
+    expected = "Error on line 2 col 11: auto"
+    assert Parser(source).parse() == expected
+
+def test_073():
+    source = """
+AAAA main (void a){}
+"""
+    expected = "Error on line 2 col 11: void"
+    assert Parser(source).parse() == expected
+
+def test_074():
+    source = """
+AAAA main (){};
+"""
+    expected = "Error on line 2 col 14: ;"
+    assert Parser(source).parse() == expected
+
+def test_075():
+    source = """
+AAAA main (){AAAA main (){}}
+"""
+    expected = "Error on line 2 col 23: ("
+    assert Parser(source).parse() == expected
+
+def test_076():
+    source = """
+struct ID {int a; ID b;};
+int main (){}
+struct ID1 {};
+id main (){}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_077():
+    source = """
+struct ID {int a; ID b;}
+"""
+    expected = "Error on line 3 col 0: <EOF>"
+    assert Parser(source).parse() == expected
+
+def test_078():
+    source = """
+struct ID {auto a;}
+"""
+    expected = "Error on line 2 col 11: auto"
+    assert Parser(source).parse() == expected
+
+def test_079():
+    source = """
+struct ID {void a;}
+"""
+    expected = "Error on line 2 col 11: void"
+    assert Parser(source).parse() == expected
+
+def test_080():
+    source = """
+struct ID {int a}
+"""
+    expected = "Error on line 2 col 16: }"
+    assert Parser(source).parse() == expected
+
+def test_081():
+    source = """
+struct ID {int a;;}
+"""
+    expected = "Error on line 2 col 17: ;"
+    assert Parser(source).parse() == expected
+
+def test_082():
+    source = """
+struct ID {int a, b;}
+"""
+    expected = "Error on line 2 col 16: ,"
+    assert Parser(source).parse() == expected
+
+def test_083():
+    source = """
+struct ID {int a; int main(){}}
+"""
+    expected = "Error on line 2 col 26: ("
+    assert Parser(source).parse() == expected
+
+def test_084():
+    source = """
+struct ID {struct ID{}}
+"""
+    expected = "Error on line 2 col 11: struct"
+    assert Parser(source).parse() == expected
+
+def test_085():
+    source = """
+int a = 2;
+"""
+    expected = "Error on line 2 col 6: ="
+    assert Parser(source).parse() == expected
+
+def test_086():
+    source = """
+    for(;;);
+"""
+    expected = "Error on line 2 col 4: for"
+    assert Parser(source).parse() == expected
+
+def test_087():
+    source = """
+void main(){for(;;)}
+"""
+    expected = "Error on line 2 col 19: }"
+    assert Parser(source).parse() == expected
+
+
+def test_088():
+    source = """
+void main(){
+    case 1:
+        printInt(1);
+}
+"""
+    expected = "Error on line 3 col 4: case"
+    assert Parser(source).parse() == expected
+
+
+def test_089():
+    source = """
+void main(){
+    T a = b;
+    True a = b;
+    true c = f;
+    F b = T;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_090():
+    source = """
+void main(){
+    auto a = 1 ** 3;
+}
+"""
+    expected = "Error on line 3 col 16: *"
+    assert Parser(source).parse() == expected
+
+def test_091():
+    source = """
+void main(){
+    auto a := 3;
+}
+"""
+    expected = "Error on line 3 col 11: :"
+    assert Parser(source).parse() == expected
+
+def test_092():
+    source = """
+struct A {};
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_093():
+    source = """
+void main(){
+    auto a := {};
+}
+"""
+    expected = "Error on line 3 col 11: :"
+    assert Parser(source).parse() == expected
+
+def test_094():
+    source = """
+void main(){
+    switch (x) { }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_095():
+    source = """
+main(){}
+void main () {}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_096():
+    source = """
+main(){for(b=a=c; i * 2; a.bc = a = 3) {return ;}}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_097():
+    source = """
+main(){for(a * 3; i * 2; a++ = 2 = 3) {return ;}}
+"""
+    expected = "Error on line 2 col 13: *"
+    assert Parser(source).parse() == expected
+
+
+def test_098():
+    source = """
+main(){for({1,2}; i * 2; a++ = 2 = 3) {return ;}}
+"""
+    expected = "Error on line 2 col 16: ;"
+    assert Parser(source).parse() == expected
+
+
+def test_099():
+    source = """
+main(){; i++; a + 2) {return ;}}
+"""
+    expected = "Error on line 2 col 7: ;"
+    assert Parser(source).parse() == expected
+
+def test_100():
+    source = """
+main(){return {{}, 1 ++};}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_101():
+    source = """
+main(){return {{}, 1 ++};}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_102():
+    source = """
+auto main(){}
+"""
+    expected = "Error on line 2 col 0: auto"
+    assert Parser(source).parse() == expected
+
+def test_103():
+    source = """
+main(){;}
+"""
+    expected = "Error on line 2 col 7: ;"
+    assert Parser(source).parse() == expected
+
+def test_104():
+    source = """
+main(){};
+"""
+    expected = "Error on line 2 col 8: ;"
+    assert Parser(source).parse() == expected
+
+def test_105():
+    source = """
+main(){
+    int a = .;
+}
+"""
+    expected = "Error on line 3 col 12: ."
+    assert Parser(source).parse() == expected
+
+def test_106():
+    source = """
+int a = 1;
+"""
+    expected = "Error on line 2 col 6: ="
+    assert Parser(source).parse() == expected
+
+def test_107():
+    source = """
+struct A{
+    main() {}
+}
+"""
+    expected = "Error on line 3 col 8: ("
+    assert Parser(source).parse() == expected
+
+def test_108():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) {
+        default:
+            printInt(0);
+        default:
+            printInt(0);
+    }
+}
+"""
+    expected = "Error on line 7 col 8: default"
+    assert Parser(source).parse() == expected
+
+
+def test_109():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) {
+        default:
+            printInt(0);
+        case 1:
+            printInt(0);
+        default:
+            printInt(0);           
+    }
+}
+"""
+    expected = "Error on line 9 col 8: default"
+    assert Parser(source).parse() == expected
+
+
+def test_110():
+    source = """
+void main () {}
+struct main {};
+main () {}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_111():
+    source = """
+void main () {
+   for(; ;a.b);
+}
+"""
+    expected = "Error on line 3 col 13: )"
+    assert Parser(source).parse() == expected
+
+def test_112():
+    source = """
+void main () {
+   for(; ;-a++);
+}
+"""
+    expected = "Error on line 3 col 10: -"
+    assert Parser(source).parse() == expected
+
+def test_113():
+    source = """
+void main () {
+   a + b = 2;
+}
+"""
+    expected = "Error on line 3 col 9: ="
+    assert Parser(source).parse() == expected
+
+def test_114():
+    source = """
+void main () {
+   a = b = c = a * 2;
+   a.b.c = a = c.d.e = 1 + 2;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_115():
+    source = """
+void main () {
+   foo().a;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_116():
+    source = """
+void main () {
+   {1, 2}.b;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_117():
+    source = """
+void main () {
+   a = 2 = a;
+}
+"""
+    expected = "Error on line 3 col 9: ="
+    assert Parser(source).parse() == expected
+
+def test_118():
+    source = """
+void main () {
+   ++!a;
+}
+"""
+    expected = "Error on line 3 col 5: !"
+    assert Parser(source).parse() == expected
+
+def test_119():
+    source = """
+void main () {
+   !a--;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_120():
+    source = """
+void main () {
+   a.b.c++;
+   --a.b.c;
+   -a.b.c;
+   ++a = 1;
+}
+"""
+    expected = "Error on line 6 col 7: ="
+    assert Parser(source).parse() == expected
+
+def test_121():
+    source = """
+void main () {
+    ++a.b;
+    a.b = 1;
+    ++(a.b) = 1;
+}
+"""
+    expected = "Error on line 5 col 12: ="
+    assert Parser(source).parse() == expected
+
+def test_122():
+    source = """
+void main () {
+    foo().b = 2;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_123():
+    source = """
+void main () {
+    a = foo().a = (a).b = "string".c.d.e = 1;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_124():
+    source = """
+void main () {
+    a = a + b = 1;
+}
+"""
+    expected = "Error on line 3 col 14: ="
+    assert Parser(source).parse() == expected
+
+def test_125():
+    source = """
+void main () {
+    ++ ! a;
+}
+"""
+    expected = "Error on line 3 col 7: !"
+    assert Parser(source).parse() == expected
+
+def test_126():
+    source = """
+void main () {
+    struct {};
+}
+"""
+    expected = "Error on line 3 col 4: struct"
+    assert Parser(source).parse() == expected
+
+def test_127():
+    source = """
+void main () {
+    ++a = 1;
+}
+"""
+    expected = "Error on line 3 col 8: ="
+    assert Parser(source).parse() == expected
+
+def test_128():
+    source = """
+void main () {
+   for(foo(1).c = 2; ; {1,2}.e = 2) {}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_129():
+    source = """
+void main () {
+   for(foo(1).c = c = 2; ; a + e = 2) {}
+}
+"""
+    expected = "Error on line 3 col 29: +"
+    assert Parser(source).parse() == expected
+
+def test_130():
+    source = """
+void main () {
+   for(2 = 2; ; a = 2) {}
+}
+"""
+    expected = "Error on line 3 col 9: ="
+    assert Parser(source).parse() == expected
+
+def test_131():
+    source = """
+void main () {
+   a++.c;
+}
+"""
+    expected = "Error on line 3 col 6: ."
+    assert Parser(source).parse() == expected
+
+def test_132():
+    source = """
+void main () {
+   ++a.c;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_133():
+    source = """
+void main () {
+   a.c++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_134():
+    source = """
+void main () {
+   a.++a;
+}
+"""
+    expected = "Error on line 3 col 5: ++"
+    assert Parser(source).parse() == expected
+
+def test_135():
+    source = """
+void main () {
+   for(++a; ; ){}
+}
+"""
+    expected = "Error on line 3 col 7: ++"
+    assert Parser(source).parse() == expected
+
+def test_136():
+    source = """
+void main () {
+   for(a--; ; ){}
+}
+"""
+    expected = "Error on line 3 col 8: --"
+    assert Parser(source).parse() == expected
+
+def test_137():
+    source = """
+void main () {
+   for(foo().a; ; ){}
+}
+"""
+    expected = "Error on line 3 col 14: ;"
+    assert Parser(source).parse() == expected
+
+def test_138():
+    source = """
+void main () {
+   (1 + 2).a.d.e;
+   {2,3,4}.f.g.h;
+   2.3.a.b.c;
+   "string".e.f.g.h;
+   (1).a.b.c.d;
+   foo(foo().a, a.b).c.d;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_139():
+    source = """
+void main () {
+   1 + {1,2} + -{a++}++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+
+def test_140():
+    source = """
+void main () {
+   for(int a, int b;;){}
+}
+"""
+    expected = "Error on line 3 col 12: ,"
+    assert Parser(source).parse() == expected
+
+def test_141():
+    source = """
+void main () {
+   for(int a;;a++,++b){}
+}
+"""
+    expected = "Error on line 3 col 17: ,"
+    assert Parser(source).parse() == expected
+
+
+def test_142():
+    source = """
+void main () {
+   for(int a;;++(a + b)){}
+    for(int a;;{a,b}--){}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_143():
+    source = """
+void main () {
+   for((a) = 2;;){}
+}
+"""
+    expected = "Error on line 3 col 11: ="
+    assert Parser(source).parse() == expected
+
+def test_144():
+    source = """
+void main () {
+   for(a;;){}
+}
+"""
+    expected = "Error on line 3 col 8: ;"
+    assert Parser(source).parse() == expected
+
+def test_145():
+    source = """
+void main () {
+   {1, 2} = 3;
+}
+"""
+    expected = "Error on line 3 col 10: ="
+    assert Parser(source).parse() == expected
+
+def test_146():
+    source = """
+void main () {
+   2.2.a.b.c.d;
+   (a) = 2;
+}
+"""
+    expected = "Error on line 4 col 7: ="
+    assert Parser(source).parse() == expected
+
+def test_147():
+    source = """
+void main () {
+   for(;;++ -- a ++ -- ) {}
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_148():
+    source = """
+void main () {
+   for(int a = 1;) {}
+}
+"""
+    expected = "Error on line 3 col 17: )"
+    assert Parser(source).parse() == expected
+
+def test_149():
+    source = """
+void main () {
+   2.0.a.b.c = {}.a.b = foo().c.d = 1;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_150():
+    source = """
+int a;
+void main () {
+}
+"""
+    expected = "Error on line 2 col 5: ;"
+    assert Parser(source).parse() == expected
+
+def test_151():
+    source = """
+void main () {
+    for(1; ;)
+}
+"""
+    expected = "Error on line 3 col 9: ;"
+    assert Parser(source).parse() == expected
+
+def test_152():
+    source = """
+void main () {
+    a(2)(3);
+}
+"""
+    expected = "Error on line 3 col 8: ("
+    assert Parser(source).parse() == expected
+
+def test_153():
+    source = """
+void main () {
+    ++ -- -a;
+}
+"""
+    expected = "Error on line 3 col 10: -"
+    assert Parser(source).parse() == expected
+
+def test_154():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) {
+        case 1:
+        case 2:
+        default:
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_155():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) {
+        default:
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_156():
+    source = """
+struct ID {int a = 1;}
+void main () {
+}
+"""
+    expected = "Error on line 2 col 17: ="
+    assert Parser(source).parse() == expected
+
+def test_157():
+    source = """
+float main () {
+    foo()++--;
+    2.3 ++;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_158():
+    source = """
+float main () {
+    foo(;; foo(1, 2))
+}
+"""
+    expected = "Error on line 3 col 8: ;"
+    assert Parser(source).parse() == expected
+
+def test_158():
+    source = """
+float main () {
+    ID{2, 3};
+}
+"""
+    expected = "Error on line 3 col 6: {"
+    assert Parser(source).parse() == expected
+
+def test_159():
+    source = """
+float main () {
+    for(;;i++++--){}
+    for(;;++++--{1,2}){}
+
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+
+def test_160():
+    source = """
+float main () {
+    endfunc a;
+    func = 1;
+    return call;
+    number = 2;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_161():
+    source = """
+float main () {
+    (a) = 2;
+}
+"""
+    expected = "Error on line 3 col 8: ="
+    assert Parser(source).parse() == expected
+
+def test_162():
+    source = """
+float main () {
+    (a).b = 2;
+    (a.b) = 3;
+}
+"""
+    expected = "Error on line 4 col 10: ="
+    assert Parser(source).parse() == expected
+
+def test_163():
+    source = """
+float main () {
+   for(i++;;)
+}
+"""
+    expected = "Error on line 3 col 8: ++"
+    assert Parser(source).parse() == expected
+
+def test_164():
+    source = """
+float main () {
+   for(++a;;)
+}
+"""
+    expected = "Error on line 3 col 7: ++"
+    assert Parser(source).parse() == expected
+
+
+def test_165():
+    source = """
+float main () {
+   for(1.2;;)
+}
+"""
+    expected = "Error on line 3 col 10: ;"
+    assert Parser(source).parse() == expected
+
+def test_166():
+    source = """
+float main () {
+{1, 3}.a.b.c.d = 1.2.a.b.c.d;
+   {1, 3} = 2;
+}
+"""
+    expected = "Error on line 4 col 10: ="
+    assert Parser(source).parse() == expected
+
+def test_165():
+    source = """
+float main () {
+   for("v";;)
+}
+"""
+    expected = "Error on line 3 col 10: ;"
+    assert Parser(source).parse() == expected
+
+def test_166():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (a=b.c=a + 2 && 3 > 2 / {1,2}) {
+    }
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_167():
+    source = """
+void main () {
+    char a = 1;
+    char ++;
+    bool --;
+    bool = 2;
+    true a;
+    false a = false;
+    do = 1;
+}
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_167():
+    source = """
+int ID = 1;
+"""
+    expected = "Error on line 2 col 7: ="
+    assert Parser(source).parse() == expected
+
+
+def test_168():
+    source = """
+void main () {
+    auto x = readInt();
+    switch (x) continue;
+}
+"""
+    expected = "Error on line 4 col 15: continue"
+    assert Parser(source).parse() == expected
+
+def test_169():
+    source = """
+void main () {
+    do {} while(1);
+}
+"""
+    expected = "Error on line 3 col 7: {"
+    assert Parser(source).parse() == expected
+
+def test_170():
+    source = """
+void main () {
+    while(1);
+}
+"""
+    expected = "Error on line 3 col 12: ;"
+    assert Parser(source).parse() == expected
+
+def test_171():
+    source = """
+void main () {
+    while(1);
+}
+"""
+    expected = "Error on line 3 col 12: ;"
+    assert Parser(source).parse() == expected
+
+def test_172():
+    source = """
+// empty
+"""
+    expected = "success"
+    assert Parser(source).parse() == expected
+
+def test_173():
+    source = """
+auto foo() {return 1;}
+"""
+    expected = "Error on line 2 col 0: auto"
+    assert Parser(source).parse() == expected
+
+def test_174():
+    source = """
+auto foo() {return 1;}
+"""
+    expected = "Error on line 2 col 0: auto"
+    assert Parser(source).parse() == expected

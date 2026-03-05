@@ -67,7 +67,7 @@ class Tokenizer:
             while True:
                 token = lexer.nextToken()
                 if token.type == -1:  # EOF
-                    tokens.append("<EOF>")
+                    tokens.append("EOF")
                     break
                 tokens.append(token.text if token.text else "")
         except Exception as e:
