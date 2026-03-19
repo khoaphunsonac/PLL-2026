@@ -67,7 +67,7 @@ class Tokenizer:
             while True:
                 token = lexer.nextToken()
                 if token.type == -1:  # EOF
-                    tokens.append("EOF")
+                    tokens.append("<EOF>")
                     break
                 tokens.append(token.text if token.text else "")
         except Exception as e:
@@ -99,34 +99,5 @@ class Parser:
         try:
             tree = parser.program()
             return "success"
-        except Exception as e:
-            return str(e)
-
-
-class Checker:
-    """Class to perform static checking on the AST."""
-
-    def __init__(self, source=None, ast=None):
-        self.source = source
-        self.ast = ast
-        self.checker = StaticChecker()
-
-    def check_from_ast(self):
-        """Perform static checking on the AST."""
-        try:
-            self.checker.check_program(self.ast)
-            return "Static checking passed"
-        except Exception as e:
-            return str(e)
-
-    def check_from_source(self):
-        """Perform static checking on the source code."""
-        try:
-            ast_gen = ASTGenerator(self.source)
-            self.ast = ast_gen.generate()
-            if isinstance(self.ast, str):  # If AST generation failed
-                return self.ast
-            self.checker.check_program(self.ast)
-            return "Static checking passed"
         except Exception as e:
             return str(e)
