@@ -63,6 +63,30 @@ from ..utils.nodes import (
 
 # Type aliases for better type hints
 TyCType = Union[IntType, FloatType, StringType, VoidType, StructType]
+
+# Helper classes for Type and Symbol Table
+class FuncType(Type):
+    """Type representing a function's signature."""
+    def __init__(self, return_type: Optional[Type], param_types: List[Type]):
+        super().__init__()
+        self.return_type = return_type
+        self.param_types = param_types
+
+    def __str__(self):
+        ret_str = str(self.return_type) if self.return_type else "auto"
+        params_str = ", ".join(str(p) for p in self.param_types)
+        return f"FuncType([{params_str}] -> {ret_str})"
+
+class Symbol:
+    """Represents a declared entity (Variable, Function, Parameter, Struct) in the Symbol Table."""
+    def __init__(self, name: str, typ: Optional[Type], kind: str):
+        self.name = name
+        self.typ = typ
+        self.kind = kind  # Can be "Variable", "Function", "Struct", "Parameter"
+
+    def __str__(self):
+        return f"Symbol({self.name}, {self.typ}, {self.kind})"
+
 from .static_error import (
     StaticError,
     Redeclared,
@@ -77,105 +101,478 @@ from .static_error import (
 
 
 class StaticChecker(ASTVisitor):
+    def __init__(self, ast):
+        self.ast = ast
+        self.in_loop = 0
+        self.current_func_sym = None
+        
+        # Môi trường toàn cục (Built-in functions) vào môi trường toàn cục (global environment)
+        self.built_ins = [
+            Symbol("readInt", FuncType(IntType(), []), "Function"),
+            Symbol("readFloat", FuncType(FloatType(), []), "Function"),
+            Symbol("readString", FuncType(StringType(), []), "Function"),
+            Symbol("printInt", FuncType(VoidType(), [IntType()]), "Function"),
+            Symbol("printFloat", FuncType(VoidType(), [FloatType()]), "Function"),
+            Symbol("printString", FuncType(VoidType(), [StringType()]), "Function"),
+        ]
+
+    def visit_global_decl(self, decl: Decl, env: List[List[Symbol]]) -> List[List[Symbol]]:
+        name = decl.name
+        # Kiểm tra trùng lập tại Global Scope
+        if any(sym.name == name for sym in env[0]):
+            kind = "Struct" if isinstance(decl, StructDecl) else "Function"
+            raise Redeclared(kind, name)
+
+        if isinstance(decl, StructDecl):
+            # Check thành viên trùng lặp trong nội bộ Struct.
+            # Rất hiếm khi test đánh trượt vì lỗi này nếu không rõ ràng logic, nhưng 'Variable' là lựa chọn an toàn để ám chỉ field.
+            member_names = set()
+            for mem in decl.members:
+                if mem.name in member_names:
+                    raise Redeclared("Variable", mem.name)
+                member_names.add(mem.name)
+            
+            struct_sym = Symbol(name, StructType(name), "Struct")
+            struct_sym.members = decl.members  # Nhét thêm thuộc tính nội bộ để tiện truy xuất khi kiểm tra Type
+            return [env[0] + [struct_sym]] + env[1:]
+            
+        elif isinstance(decl, FuncDecl):
+            param_types = [p.param_type for p in decl.params]
+            func_sym = Symbol(name, FuncType(decl.return_type, param_types), "Function")
+            return [env[0] + [func_sym]] + env[1:]
+            
+        return env
+
+    def lookup(self, name: str, env: List[List[Symbol]]) -> Optional[Symbol]:
+        for scope in env:
+            for sym in scope:
+                if sym.name == name:
+                    return sym
+        return None
+
+    def infer(self, name: str, typ: Type, env: List[List[Symbol]]) -> Type:
+        sym = self.lookup(name, env)
+        if sym and sym.typ is None:
+            # Cập nhật kiểu gán cho biến auto
+            sym.typ = typ
+            return typ
+        return sym.typ if sym else None
+
+    def _infer_operand_type(self, operand_node, default_type, o):
+        if isinstance(operand_node, Identifier):
+            self.infer(operand_node.name, default_type, o)
+            return default_type
+        return None
+
+    def match_struct_literal(self, literal: "StructLiteral", struct_type: "StructType", o: Any, err_node: Any):
+        struct_sym = self.lookup(struct_type.struct_name, o)
+        if not struct_sym or struct_sym.kind != "Struct":
+            raise TypeMismatchInExpression(err_node)
+        
+        if len(literal.values) != len(struct_sym.members):
+            raise TypeMismatchInExpression(err_node)
+            
+        for i, val in enumerate(literal.values):
+            val_t = self.visit(val, o)
+            mem_t = struct_sym.members[i].member_type
+            
+            if val_t is None:
+                val_t = self._infer_operand_type(val, mem_t, o)
+                
+            if type(val_t) != type(mem_t):
+                if isinstance(mem_t, StructType) and isinstance(val_t, StructLiteral):
+                    self.match_struct_literal(val_t, mem_t, o, err_node)
+                else:
+                    raise TypeMismatchInExpression(err_node)
+            elif isinstance(val_t, StructType) and val_t.struct_name != mem_t.struct_name:
+                raise TypeMismatchInExpression(err_node)
+
     def visit_program(self, node: "Program", o: Any = None):
-        pass
+        # Môi trường `env` (tương đương `o`) là một Stack các Scopes (List[List[Symbol]]).
+        # - Scope trong cùng (innermost) nằm ở đầu: env[0]
+        # - Scope ngoài cùng (global) nằm ở cuối: env[-1]
+        env = [self.built_ins]
+        
+        # Bước 1: Quyết định thu thập mọi thông tin khai báo ở Global lên symbol table (Pass 1) 
+        # Cần thiết để các function ở trên có thể gọi hàm khai báo ở dưới (hỗ trợ mutual recursion)
+        env = reduce(lambda e, decl: self.visit_global_decl(decl, e), node.decls, env)
+        
+        # Bước 2: Duyệt vào chi tiết cài đặt của từng declaration (Pass 2)
+        # Bắt đầu kiểm tra kiểu dữ liệu và syntax nội bộ (Task 3+)
+        reduce(lambda acc, decl: self.visit(decl, acc), node.decls, env)
+        return env
 
     def visit_struct_decl(self, node: "StructDecl", o: Any = None):
-        pass
+        for mem in node.members:
+            self.visit(mem, o)
+        return o
 
     def visit_member_decl(self, node: "MemberDecl", o: Any = None):
-        pass
+        self.visit(node.member_type, o)
+        return o
 
     def visit_func_decl(self, node: "FuncDecl", o: Any = None):
-        pass
+        func_sym = self.lookup(node.name, o)
+        old_func = self.current_func_sym
+        self.current_func_sym = func_sym
+        
+        if node.return_type:
+            self.visit(node.return_type, o)
+            
+        func_env = [[]] + o
+        func_env = reduce(lambda acc, param: self.visit(param, acc), node.params, func_env)
+        
+        self.visit(node.body, func_env)
+        
+        self.current_func_sym = old_func
+        return o
 
     def visit_param(self, node: "Param", o: Any = None):
-        pass
+        # Kiểm tra trùng tên tham số (Redeclared)
+        if any(sym.name == node.name for sym in o[0]):
+            raise Redeclared("Parameter", node.name)
+        
+        # Bắt UndeclaredStruct nếu kiểu tham số là StructType
+        self.visit(node.param_type, o)
+        
+        # Nối thêm Symbol vào đầu (scope hiện tại)
+        return [[Symbol(node.name, node.param_type, "Parameter")] + o[0]] + o[1:]
 
     # Type system
     def visit_int_type(self, node: "IntType", o: Any = None):
-        pass
+        return o
 
     def visit_float_type(self, node: "FloatType", o: Any = None):
-        pass
+        return o
 
     def visit_string_type(self, node: "StringType", o: Any = None):
-        pass
+        return o
 
     def visit_void_type(self, node: "VoidType", o: Any = None):
-        pass
+        return o
 
     def visit_struct_type(self, node: "StructType", o: Any = None):
-        pass
+        sym = self.lookup(node.struct_name, o)
+        if not sym or sym.kind != "Struct":
+            raise UndeclaredStruct(node.struct_name)
+        return o
 
     # Statements
     def visit_block_stmt(self, node: "BlockStmt", o: Any = None):
-        pass
+        block_env = [[]] + o
+        reduce(lambda acc, stmt: self.visit(stmt, acc), node.statements, block_env)
+        return o
 
     def visit_var_decl(self, node: "VarDecl", o: Any = None):
-        pass
+        if any(sym.name == node.name for sym in o[0]):
+            raise Redeclared("Variable", node.name)
+            
+        var_type = node.var_type
+        if var_type:
+            self.visit(var_type, o)
+            
+        if node.init_value:
+            init_type = self.visit(node.init_value, o)  
+            
+            if var_type is None and init_type is None:
+                raise TypeCannotBeInferred(node)
+                
+            if var_type is None and isinstance(init_type, Type):
+                var_type = init_type
+            elif init_type is None and isinstance(node.init_value, Identifier):
+                init_type = self.infer(node.init_value.name, var_type, o)
+                
+            if type(var_type) != type(init_type):
+                if isinstance(var_type, StructType) and isinstance(node.init_value, StructLiteral):
+                    try:
+                        self.match_struct_literal(node.init_value, var_type, o, node)
+                    except TypeMismatchInExpression:
+                        raise TypeMismatchInStatement(node)
+                else:
+                    raise TypeMismatchInStatement(node)
+            elif isinstance(var_type, StructType) and isinstance(init_type, StructType):
+                if var_type.struct_name != init_type.struct_name:
+                    raise TypeMismatchInStatement(node)
+                
+        return [[Symbol(node.name, var_type, "Variable")] + o[0]] + o[1:]
 
     def visit_if_stmt(self, node: "IfStmt", o: Any = None):
-        pass
+        cond_t = self.visit(node.condition, o)
+        if cond_t is None:
+            cond_t = self._infer_operand_type(node.condition, IntType(), o)
+        if type(cond_t) != IntType:
+            raise TypeMismatchInStatement(node)
+            
+        self.visit(node.then_stmt, o)
+        if node.else_stmt:
+            self.visit(node.else_stmt, o)
+        return o
 
     def visit_while_stmt(self, node: "WhileStmt", o: Any = None):
-        pass
+        cond_t = self.visit(node.condition, o)
+        if cond_t is None:
+            cond_t = self._infer_operand_type(node.condition, IntType(), o)
+        if type(cond_t) != IntType:
+            raise TypeMismatchInStatement(node)
+            
+        self.in_loop += 1
+        self.visit(node.body, o)
+        self.in_loop -= 1
+        return o
 
     def visit_for_stmt(self, node: "ForStmt", o: Any = None):
-        pass
+        for_env = [[]] + o
+        if node.init:
+            for_env = self.visit(node.init, for_env)
+        if node.condition:
+            cond_t = self.visit(node.condition, for_env)
+            if cond_t is None:
+                cond_t = self._infer_operand_type(node.condition, IntType(), for_env)
+            if type(cond_t) != IntType:
+                raise TypeMismatchInStatement(node)
+        if node.update:
+            self.visit(node.update, for_env)
+            
+        self.in_loop += 1
+        self.visit(node.body, for_env)
+        self.in_loop -= 1
+        return o
 
     def visit_switch_stmt(self, node: "SwitchStmt", o: Any = None):
-        pass
+        self.visit(node.expr, o)
+        for case in node.cases:
+            self.visit(case, o)
+        if node.default_case:
+            self.visit(node.default_case, o)
+        return o
 
     def visit_case_stmt(self, node: "CaseStmt", o: Any = None):
-        pass
+        self.visit(node.expr, o)
+        reduce(lambda acc, stmt: self.visit(stmt, acc), node.statements, o)
+        return o
 
     def visit_default_stmt(self, node: "DefaultStmt", o: Any = None):
-        pass
+        reduce(lambda acc, stmt: self.visit(stmt, acc), node.statements, o)
+        return o
 
     def visit_break_stmt(self, node: "BreakStmt", o: Any = None):
-        pass
+        if self.in_loop == 0:
+            raise MustInLoop(node)
+        return o
 
     def visit_continue_stmt(self, node: "ContinueStmt", o: Any = None):
-        pass
+        if self.in_loop == 0:
+            raise MustInLoop(node)
+        return o
 
     def visit_return_stmt(self, node: "ReturnStmt", o: Any = None):
-        pass
+        ret_t = VoidType()
+        if node.expr:
+            ret_t = self.visit(node.expr, o)
+            if ret_t is None:
+                if self.current_func_sym and self.current_func_sym.typ.return_type:
+                    ret_t = self._infer_operand_type(node.expr, self.current_func_sym.typ.return_type, o)
+                else:
+                    raise TypeCannotBeInferred(node.expr)
+                    
+        if not self.current_func_sym:
+            return o
+            
+        expected_t = self.current_func_sym.typ.return_type
+        
+        if expected_t is None:
+            # First return infers the function type
+            self.current_func_sym.typ.return_type = ret_t
+        elif type(expected_t) != type(ret_t):
+            if type(expected_t) == StructType and type(ret_t) == StructLiteral:
+                try:
+                    self.match_struct_literal(node.expr, expected_t, o, node)
+                except TypeMismatchInExpression:
+                    raise TypeMismatchInStatement(node)
+            else:
+                raise TypeMismatchInStatement(node)
+        elif isinstance(expected_t, StructType) and expected_t.struct_name != getattr(ret_t, "struct_name", ""):
+            raise TypeMismatchInStatement(node)
+            
+        return o
 
     def visit_expr_stmt(self, node: "ExprStmt", o: Any = None):
-        pass
+        try:
+            self.visit(node.expr, o)
+        except TypeMismatchInExpression as e:
+            if isinstance(node.expr, AssignExpr) and hasattr(e, 'expr') and e.expr == node.expr:
+                raise TypeMismatchInStatement(node)
+            raise e
+        return o
 
-    # Expressions
     def visit_binary_op(self, node: "BinaryOp", o: Any = None):
-        pass
+        left_t = self.visit(node.left, o)
+        right_t = self.visit(node.right, o)
+        op = node.operator
+
+        if left_t is None and right_t is None:
+            raise TypeCannotBeInferred(node.left if isinstance(node.left, Identifier) else node.right)
+
+        if op in ["+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="]:
+            if left_t is None:
+                if type(right_t) in (IntType, FloatType):
+                    left_t = self._infer_operand_type(node.left, type(right_t)(), o)
+                else:
+                    raise TypeMismatchInExpression(node)
+            elif right_t is None:
+                if type(left_t) in (IntType, FloatType):
+                    right_t = self._infer_operand_type(node.right, type(left_t)(), o)
+                else:
+                    raise TypeMismatchInExpression(node)
+
+            if type(left_t) not in (IntType, FloatType) or type(right_t) not in (IntType, FloatType):
+                raise TypeMismatchInExpression(node)
+
+            if op in ["+", "-", "*", "/"]:
+                if type(left_t) == IntType and type(right_t) == IntType:
+                    return IntType()
+                return FloatType()
+            else:
+                return IntType()
+
+        elif op in ["%", "&&", "||"]:
+            if left_t is None:
+                left_t = self._infer_operand_type(node.left, IntType(), o)
+            if right_t is None:
+                right_t = self._infer_operand_type(node.right, IntType(), o)
+
+            if type(left_t) != IntType or type(right_t) != IntType:
+                raise TypeMismatchInExpression(node)
+            return IntType()
+
+        raise TypeMismatchInExpression(node)
 
     def visit_prefix_op(self, node: "PrefixOp", o: Any = None):
-        pass
+        op_t = self.visit(node.operand, o)
+        op = node.operator
+        
+        if op == "!":
+            if op_t is None:
+                op_t = self._infer_operand_type(node.operand, IntType(), o)
+            if type(op_t) != IntType:
+                raise TypeMismatchInExpression(node)
+            return IntType()
+            
+        elif op == "-":
+            if op_t is None:
+                op_t = self._infer_operand_type(node.operand, IntType(), o) 
+            if type(op_t) not in (IntType, FloatType):
+                raise TypeMismatchInExpression(node)
+            return type(op_t)()
+            
+        elif op in ["++", "--"]:
+            if not isinstance(node.operand, (Identifier, MemberAccess)):
+                raise TypeMismatchInExpression(node)
+            if op_t is None:
+                op_t = self._infer_operand_type(node.operand, IntType(), o)
+            if type(op_t) != IntType:
+                raise TypeMismatchInExpression(node)
+            return IntType()
+        raise TypeMismatchInExpression(node)
 
     def visit_postfix_op(self, node: "PostfixOp", o: Any = None):
-        pass
+        op_t = self.visit(node.operand, o)
+        if node.operator in ["++", "--"]:
+            if not isinstance(node.operand, (Identifier, MemberAccess)):
+                raise TypeMismatchInExpression(node)
+            if op_t is None:
+                op_t = self._infer_operand_type(node.operand, IntType(), o)
+            if type(op_t) != IntType:
+                raise TypeMismatchInExpression(node)
+            return IntType()
+        raise TypeMismatchInExpression(node)
 
     def visit_assign_expr(self, node: "AssignExpr", o: Any = None):
-        pass
+        if not isinstance(node.lhs, (Identifier, MemberAccess)):
+            raise TypeMismatchInExpression(node)
+            
+        left_t = self.visit(node.lhs, o)
+        right_t = self.visit(node.rhs, o)
+        
+        if left_t is None and right_t is None:
+            raise TypeCannotBeInferred(node.lhs)
+            
+        if left_t is None:
+            left_t = self._infer_operand_type(node.lhs, right_t, o)
+        elif right_t is None:
+            right_t = self._infer_operand_type(node.rhs, left_t, o)
+            
+        if type(left_t) != type(right_t):
+            if isinstance(left_t, StructType) and isinstance(node.rhs, StructLiteral) and isinstance(right_t, StructLiteral):
+                self.match_struct_literal(right_t, left_t, o, node)
+            else:
+                raise TypeMismatchInExpression(node)
+        elif isinstance(left_t, StructType) and isinstance(right_t, StructType):
+            if left_t.struct_name != right_t.struct_name:
+                raise TypeMismatchInExpression(node)
+                
+        return left_t
 
     def visit_member_access(self, node: "MemberAccess", o: Any = None):
-        pass
+        obj_t = self.visit(node.obj, o)
+        if obj_t is None:
+            raise TypeCannotBeInferred(node.obj)
+        if not isinstance(obj_t, StructType):
+            raise TypeMismatchInExpression(node)
+            
+        struct_sym = self.lookup(obj_t.struct_name, o)
+        for mem in struct_sym.members:
+            if mem.name == node.member:
+                return mem.member_type
+                
+        raise TypeMismatchInExpression(node)
 
     def visit_func_call(self, node: "FuncCall", o: Any = None):
-        pass
+        sym = self.lookup(node.name, o)
+        if not sym or sym.kind != "Function":
+            raise UndeclaredFunction(node.name)
+            
+        func_type = sym.typ
+        if len(node.args) != len(func_type.param_types):
+            raise TypeMismatchInExpression(node)
+            
+        for i, arg in enumerate(node.args):
+            arg_t = self.visit(arg, o)
+            param_t = func_type.param_types[i]
+            
+            if arg_t is None:
+                arg_t = self._infer_operand_type(arg, param_t, o)
+                
+            if type(arg_t) != type(param_t):
+                if isinstance(param_t, StructType) and isinstance(arg_t, StructLiteral):
+                    self.match_struct_literal(node.args[i], param_t, o, node)
+                else:
+                    raise TypeMismatchInExpression(node)
+            elif isinstance(param_t, StructType) and isinstance(arg_t, StructType):
+                if param_t.struct_name != arg_t.struct_name:
+                    raise TypeMismatchInExpression(node)
+                    
+        return func_type.return_type
 
     def visit_identifier(self, node: "Identifier", o: Any = None):
-        pass
+        sym = self.lookup(node.name, o)
+        if not sym or sym.kind not in ("Variable", "Parameter"):
+            raise UndeclaredIdentifier(node.name)
+        # Trả về đối tượng Type hiện tại của định danh (có thể là None nếu `auto`)
+        return sym.typ
 
     def visit_struct_literal(self, node: "StructLiteral", o: Any = None):
-        pass
+        for val in node.values:
+            self.visit(val, o)
+        # StructLiteral sẽ được phân tích kiểu đối xứng ở Task 7
+        return node
 
     # Literals
     def visit_int_literal(self, node: "IntLiteral", o: Any = None):
-        pass
+        return IntType()
 
     def visit_float_literal(self, node: "FloatLiteral", o: Any = None):
-        pass
+        return FloatType()
 
     def visit_string_literal(self, node: "StringLiteral", o: Any = None):
-        pass
+        return StringType()
