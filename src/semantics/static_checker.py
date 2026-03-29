@@ -132,23 +132,24 @@ class StaticChecker(ASTVisitor):
         name = decl.name
         # Kiểm tra trùng lập tại Global Scope
         if any(sym.name == name for sym in env[0]):
-            kind = "Struct" if isinstance(decl, StructDecl) else "Function"
+            kind = "Struct" if type(decl) == StructDecl else "Function"
             raise Redeclared(kind, name)
 
-        if isinstance(decl, StructDecl):
+        if type(decl) == StructDecl:
             # Check thành viên trùng lặp trong nội bộ Struct.
             # Rất hiếm khi test đánh trượt vì lỗi này nếu không rõ ràng logic, nhưng 'Variable' là lựa chọn an toàn để ám chỉ field.
-            member_names = set()
-            for mem in decl.members:
-                if mem.name in member_names:
+            def add_member_name(seen: Set[str], mem: MemberDecl) -> Set[str]:
+                if mem.name in seen:
                     raise Redeclared("Variable", mem.name)
-                member_names.add(mem.name)
+                return seen | {mem.name}
+
+            reduce(add_member_name, decl.members, set())
             
             struct_sym = Symbol(name, StructType(name), "Struct")
             struct_sym.members = decl.members  # Nhét thêm thuộc tính nội bộ để tiện truy xuất khi kiểm tra Type
             return [env[0] + [struct_sym]] + env[1:]
             
-        elif isinstance(decl, FuncDecl):
+        elif type(decl) == FuncDecl:
             param_types = [p.param_type for p in decl.params]
             func_sym = Symbol(name, FuncType(decl.return_type, param_types), "Function")
             return [env[0] + [func_sym]] + env[1:]
@@ -156,11 +157,10 @@ class StaticChecker(ASTVisitor):
         return env
 
     def lookup(self, name: str, env: List[List[Symbol]]) -> Optional[Symbol]:
-        for scope in env:
-            for sym in scope:
-                if sym.name == name:
-                    return sym
-        return None
+        return next(
+            (sym for scope in env for sym in scope if sym.name == name),
+            None,
+        )
 
     def infer(self, name: str, typ: Type, env: List[List[Symbol]]) -> Type:
         sym = self.lookup(name, env)
@@ -171,12 +171,19 @@ class StaticChecker(ASTVisitor):
         return sym.typ if sym else None
 
     def _infer_operand_type(self, operand_node, default_type, o):
-        if default_type is None or not isinstance(default_type, Type):
+        if default_type is None or type(default_type) not in (IntType, FloatType, StringType, VoidType, StructType, FuncType):
             return None
-        if isinstance(operand_node, Identifier):
+        if type(operand_node) == Identifier:
             self.infer(operand_node.name, default_type, o)
             return default_type
         return None
+
+    def _is_numeric_type(self, typ: Optional[Type]) -> bool:
+        return type(typ) in (IntType, FloatType)
+
+    def _pick_inference_target(self, left: Expr, right: Expr) -> Expr:
+        candidates = [left, right]
+        return next((node for node in candidates if type(node) == Identifier), left)
 
     def match_struct_literal(self, literal: "StructLiteral", struct_type: "StructType", o: Any, err_node: Any):
         struct_sym = self.lookup(struct_type.struct_name, o)
@@ -186,20 +193,24 @@ class StaticChecker(ASTVisitor):
         if len(literal.values) != len(struct_sym.members):
             raise TypeMismatchInExpression(err_node)
             
-        for i, val in enumerate(literal.values):
+        def check_item(_: None, pair: Tuple[int, Expr]) -> None:
+            i, val = pair
             val_t = self.visit(val, o)
             mem_t = struct_sym.members[i].member_type
-            
+
             if val_t is None:
                 val_t = self._infer_operand_type(val, mem_t, o)
-                
+
             if type(val_t) != type(mem_t):
-                if isinstance(mem_t, StructType) and isinstance(val_t, StructLiteral):
+                if type(mem_t) == StructType and type(val_t) == StructLiteral:
                     self.match_struct_literal(val_t, mem_t, o, err_node)
                 else:
                     raise TypeMismatchInExpression(err_node)
-            elif isinstance(val_t, StructType) and val_t.struct_name != mem_t.struct_name:
+            elif type(val_t) == StructType and val_t.struct_name != mem_t.struct_name:
                 raise TypeMismatchInExpression(err_node)
+            return None
+
+        reduce(check_item, enumerate(literal.values), None)
 
     def visit_program(self, node: "Program", o: Any = None):
         # Môi trường `env` (tương đương `o`) là một Stack các Scopes (List[List[Symbol]]).
@@ -209,14 +220,15 @@ class StaticChecker(ASTVisitor):
 
         # Duyệt declaration theo thứ tự xuất hiện để bắt lỗi "dùng trước khi khai báo"
         # cho function và struct theo bộ test hiện tại.
-        for decl in node.decls:
-            env = self.visit_global_decl(decl, env)
-            self.visit(decl, env)
-        return env
+        def visit_decl(acc_env: List[List[Symbol]], decl: Decl) -> List[List[Symbol]]:
+            next_env = self.visit_global_decl(decl, acc_env)
+            self.visit(decl, next_env)
+            return next_env
+
+        return reduce(visit_decl, node.decls, env)
 
     def visit_struct_decl(self, node: "StructDecl", o: Any = None):
-        for mem in node.members:
-            self.visit(mem, o)
+        reduce(lambda acc, mem: self.visit(mem, o), node.members, None)
         return o
 
     def visit_member_decl(self, node: "MemberDecl", o: Any = None):
@@ -250,7 +262,7 @@ class StaticChecker(ASTVisitor):
         
         # Bắt UndeclaredStruct nếu kiểu tham số là StructType
         self.visit(node.param_type, o)
-        if isinstance(node.param_type, VoidType):
+        if type(node.param_type) == VoidType:
             raise TypeMismatchInStatement(node)
         
         # Nối thêm Symbol vào đầu (scope hiện tại)
@@ -288,7 +300,7 @@ class StaticChecker(ASTVisitor):
         var_type = node.var_type
         if var_type:
             self.visit(var_type, o)
-            if isinstance(var_type, VoidType):
+            if type(var_type) == VoidType:
                 raise TypeMismatchInStatement(node)
             
         if node.init_value:
@@ -297,24 +309,24 @@ class StaticChecker(ASTVisitor):
             if var_type is None and init_type is None:
                 raise TypeCannotBeInferred(node)
 
-            if var_type is None and isinstance(init_type, StructLiteral):
+            if var_type is None and type(init_type) == StructLiteral:
                 # Bare struct literal has no nominal type unless context provides one.
                 raise TypeCannotBeInferred(node)
                 
-            if var_type is None and isinstance(init_type, Type):
+            if var_type is None and type(init_type) in (IntType, FloatType, StringType, VoidType, StructType):
                 var_type = init_type
-            elif init_type is None and isinstance(node.init_value, Identifier):
+            elif init_type is None and type(node.init_value) == Identifier:
                 init_type = self.infer(node.init_value.name, var_type, o)
                 
             if type(var_type) != type(init_type):
-                if isinstance(var_type, StructType) and isinstance(node.init_value, StructLiteral):
+                if type(var_type) == StructType and type(node.init_value) == StructLiteral:
                     try:
                         self.match_struct_literal(node.init_value, var_type, o, node)
                     except TypeMismatchInExpression:
                         raise TypeMismatchInStatement(node)
                 else:
                     raise TypeMismatchInStatement(node)
-            elif isinstance(var_type, StructType) and isinstance(init_type, StructType):
+            elif type(var_type) == StructType and type(init_type) == StructType:
                 if var_type.struct_name != init_type.struct_name:
                     raise TypeMismatchInStatement(node)
                 
@@ -371,8 +383,7 @@ class StaticChecker(ASTVisitor):
 
         self.in_switch += 1
         try:
-            for case in node.cases:
-                self.visit(case, o)
+            reduce(lambda acc, case: self.visit(case, o), node.cases, None)
             if node.default_case:
                 self.visit(node.default_case, o)
         finally:
@@ -419,7 +430,7 @@ class StaticChecker(ASTVisitor):
         
         if expected_t is None:
             # First return infers the function type
-            if isinstance(ret_t, StructLiteral):
+            if type(ret_t) == StructLiteral:
                 raise TypeCannotBeInferred(node.expr)
             self.current_func_sym.typ.return_type = ret_t
         elif type(expected_t) != type(ret_t):
@@ -430,18 +441,13 @@ class StaticChecker(ASTVisitor):
                     raise TypeMismatchInStatement(node)
             else:
                 raise TypeMismatchInStatement(node)
-        elif isinstance(expected_t, StructType) and expected_t.struct_name != getattr(ret_t, "struct_name", ""):
+        elif type(expected_t) == StructType and expected_t.struct_name != getattr(ret_t, "struct_name", ""):
             raise TypeMismatchInStatement(node)
             
         return o
 
     def visit_expr_stmt(self, node: "ExprStmt", o: Any = None):
-        try:
-            self.visit(node.expr, o)
-        except TypeMismatchInExpression as e:
-            if isinstance(node.expr, AssignExpr) and hasattr(e, 'expr') and e.expr == node.expr:
-                raise TypeMismatchInStatement(node)
-            raise e
+        self.visit(node.expr, o)
         return o
 
     def visit_binary_op(self, node: "BinaryOp", o: Any = None):
@@ -449,32 +455,34 @@ class StaticChecker(ASTVisitor):
         right_t = self.visit(node.right, o)
         op = node.operator
 
-        if left_t is None and right_t is None:
-            raise TypeCannotBeInferred(node.left if isinstance(node.left, Identifier) else node.right)
+        numeric_ops = ["+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="]
+        int_only_ops = ["%", "&&", "||"]
 
-        if op in ["+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="]:
+        if op in numeric_ops:
+            if left_t is None and right_t is None:
+                raise TypeCannotBeInferred(self._pick_inference_target(node.left, node.right))
+
             if left_t is None:
-                if type(right_t) in (IntType, FloatType):
+                if self._is_numeric_type(right_t):
                     left_t = self._infer_operand_type(node.left, type(right_t)(), o)
                 else:
                     raise TypeMismatchInExpression(node)
             elif right_t is None:
-                if type(left_t) in (IntType, FloatType):
+                if self._is_numeric_type(left_t):
                     right_t = self._infer_operand_type(node.right, type(left_t)(), o)
                 else:
                     raise TypeMismatchInExpression(node)
 
-            if type(left_t) not in (IntType, FloatType) or type(right_t) not in (IntType, FloatType):
+            if not self._is_numeric_type(left_t) or not self._is_numeric_type(right_t):
                 raise TypeMismatchInExpression(node)
 
             if op in ["+", "-", "*", "/"]:
                 if type(left_t) == IntType and type(right_t) == IntType:
                     return IntType()
                 return FloatType()
-            else:
-                return IntType()
+            return IntType()
 
-        elif op in ["%", "&&", "||"]:
+        if op in int_only_ops:
             if left_t is None:
                 left_t = self._infer_operand_type(node.left, IntType(), o)
             if right_t is None:
@@ -512,7 +520,7 @@ class StaticChecker(ASTVisitor):
             return type(op_t)()
             
         elif op in ["++", "--"]:
-            if not isinstance(node.operand, (Identifier, MemberAccess)):
+            if type(node.operand) not in (Identifier, MemberAccess):
                 raise TypeMismatchInExpression(node)
             if op_t is None:
                 op_t = self._infer_operand_type(node.operand, IntType(), o)
@@ -524,7 +532,7 @@ class StaticChecker(ASTVisitor):
     def visit_postfix_op(self, node: "PostfixOp", o: Any = None):
         op_t = self.visit(node.operand, o)
         if node.operator in ["++", "--"]:
-            if not isinstance(node.operand, (Identifier, MemberAccess)):
+            if type(node.operand) not in (Identifier, MemberAccess):
                 raise TypeMismatchInExpression(node)
             if op_t is None:
                 op_t = self._infer_operand_type(node.operand, IntType(), o)
@@ -534,7 +542,7 @@ class StaticChecker(ASTVisitor):
         raise TypeMismatchInExpression(node)
 
     def visit_assign_expr(self, node: "AssignExpr", o: Any = None):
-        if not isinstance(node.lhs, (Identifier, MemberAccess)):
+        if type(node.lhs) not in (Identifier, MemberAccess):
             raise TypeMismatchInExpression(node)
             
         left_t = self.visit(node.lhs, o)
@@ -543,7 +551,7 @@ class StaticChecker(ASTVisitor):
         if left_t is None and right_t is None:
             raise TypeCannotBeInferred(node.lhs)
 
-        if left_t is None and isinstance(right_t, StructLiteral):
+        if left_t is None and type(right_t) == StructLiteral:
             # Cannot infer a nominal struct type from a literal without expected context.
             raise TypeCannotBeInferred(node.lhs)
             
@@ -553,11 +561,11 @@ class StaticChecker(ASTVisitor):
             right_t = self._infer_operand_type(node.rhs, left_t, o)
             
         if type(left_t) != type(right_t):
-            if isinstance(left_t, StructType) and isinstance(node.rhs, StructLiteral) and isinstance(right_t, StructLiteral):
+            if type(left_t) == StructType and type(node.rhs) == StructLiteral and type(right_t) == StructLiteral:
                 self.match_struct_literal(right_t, left_t, o, node)
             else:
                 raise TypeMismatchInExpression(node)
-        elif isinstance(left_t, StructType) and isinstance(right_t, StructType):
+        elif type(left_t) == StructType and type(right_t) == StructType:
             if left_t.struct_name != right_t.struct_name:
                 raise TypeMismatchInExpression(node)
                 
@@ -567,15 +575,14 @@ class StaticChecker(ASTVisitor):
         obj_t = self.visit(node.obj, o)
         if obj_t is None:
             raise TypeCannotBeInferred(node.obj)
-        if not isinstance(obj_t, StructType):
+        if type(obj_t) != StructType:
             raise TypeMismatchInExpression(node)
             
         struct_sym = self.lookup(obj_t.struct_name, o)
-        for mem in struct_sym.members:
-            if mem.name == node.member:
-                return mem.member_type
-                
-        raise TypeMismatchInExpression(node)
+        member = next((mem for mem in struct_sym.members if mem.name == node.member), None)
+        if member is None:
+            raise TypeMismatchInExpression(node)
+        return member.member_type
 
     def visit_func_call(self, node: "FuncCall", o: Any = None):
         sym = self.lookup(node.name, o)
@@ -586,21 +593,25 @@ class StaticChecker(ASTVisitor):
         if len(node.args) != len(func_type.param_types):
             raise TypeMismatchInExpression(node)
             
-        for i, arg in enumerate(node.args):
+        def check_arg(_: None, pair: Tuple[int, Expr]) -> None:
+            i, arg = pair
             arg_t = self.visit(arg, o)
             param_t = func_type.param_types[i]
-            
+
             if arg_t is None:
                 arg_t = self._infer_operand_type(arg, param_t, o)
-                
+
             if type(arg_t) != type(param_t):
-                if isinstance(param_t, StructType) and isinstance(arg_t, StructLiteral):
+                if type(param_t) == StructType and type(arg_t) == StructLiteral:
                     self.match_struct_literal(node.args[i], param_t, o, node)
                 else:
                     raise TypeMismatchInExpression(node)
-            elif isinstance(param_t, StructType) and isinstance(arg_t, StructType):
+            elif type(param_t) == StructType and type(arg_t) == StructType:
                 if param_t.struct_name != arg_t.struct_name:
                     raise TypeMismatchInExpression(node)
+            return None
+
+        reduce(check_arg, enumerate(node.args), None)
                     
         return func_type.return_type
 
@@ -612,8 +623,7 @@ class StaticChecker(ASTVisitor):
         return sym.typ
 
     def visit_struct_literal(self, node: "StructLiteral", o: Any = None):
-        for val in node.values:
-            self.visit(val, o)
+        reduce(lambda acc, val: self.visit(val, o), node.values, None)
         # StructLiteral sẽ được phân tích kiểu đối xứng ở Task 7
         return node
 
