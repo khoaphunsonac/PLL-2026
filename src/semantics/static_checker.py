@@ -252,7 +252,7 @@ class StaticChecker(ASTVisitor):
         
         # 2. Móc ruột các statement trong Block ngoài cùng ra để duyệt.
         # Tuyệt đối không gọi self.visit(node.body) vì nó sẽ nhảy vào visit_block_stmt và tạo scope rác.
-        self.visit(node.body, func_env)
+        reduce(lambda acc, stmt: self.visit(stmt, acc), node.body.statements, func_env)
 
         # 3. Xử lý kiểu trả về nếu hàm là auto/không khai báo
         if self.current_func_sym and self.current_func_sym.typ.return_type is None:
