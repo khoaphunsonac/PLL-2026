@@ -735,16 +735,14 @@ void main() {
 
 
 def test_059():
-    """TypeMismatchInExpression: struct equality not supported"""
     source = """
-struct Point { int x; int y; };
-void main() {
-    Point p1 = {1, 2};
-    Point p2 = {1, 2};
-    int same = p1 == p2;
+int foo() {
+    auto a;
+    auto b;
+    a = b;
 }
 """
-    assert Checker(source).check_from_source() == "TypeMismatchInExpression(BinaryOp(Identifier(p1), ==, Identifier(p2)))"
+    assert Checker(source).check_from_source() == "TypeCannotBeInferred(AssignExpr(Identifier(a) = Identifier(b)))"
 
 
 def test_060():
@@ -775,17 +773,12 @@ void main() {
 
 
 def test_062():
-    """TypeMismatchInStatement: if condition is string"""
     source = """
 void main() {
-    string message = "hello";
-    if (message) {
-        printString(message);
-    }
+    main();
 }
 """
-    assert Checker(source).check_from_source() == "TypeMismatchInStatement(IfStmt(if Identifier(message) then BlockStmt([ExprStmt(FuncCall(printString, [Identifier(message)]))])))"
-
+    assert Checker(source).check_from_source() == "Static checking passed"
 
 def test_063():
     """TypeMismatchInStatement: while condition is float"""
@@ -812,14 +805,14 @@ void main() {
 
 
 def test_065():
-    """TypeMismatchInStatement: for condition is string (with VarDecl init)"""
     source = """
-void main() {
-    for (int i = 0; "hello"; ++i) {}
-}
+struct Point {
+    int Point;
+    int y;
+};
+void Point(Point a) {}
 """
-    assert Checker(source).check_from_source() == "TypeMismatchInStatement(ForStmt(for VarDecl(IntType(), i = IntLiteral(0)); StringLiteral('hello'); PrefixOp(++Identifier(i)) do BlockStmt([])))"
-
+    assert Checker(source).check_from_source() == "Static checking passed"
 
 def test_066():
     """TypeMismatchInStatement: switch expression is float"""
@@ -999,28 +992,23 @@ void main() {
 
 
 def test_082():
-    """MustInLoop: continue outside any loop"""
     source = """
 void main() {
-    continue;
+    for(int a;;) break;
+    int a;
 }
 """
-    assert Checker(source).check_from_source() == "MustInLoop(ContinueStmt())"
+    assert Checker(source).check_from_source() == "Redeclared(Variable, a)"
 
 
 def test_083():
-    """MustInLoop: continue in switch (not allowed)"""
     source = """
 void main() {
-    int x = 1;
-    switch (x) {
-        case 1:
-            break;
-            continue;
-    }
+    int a;
+    for(int a;;) break;
 }
 """
-    assert Checker(source).check_from_source() == "MustInLoop(ContinueStmt())"
+    assert Checker(source).check_from_source() == "Redeclared(Variable, a)"
 
 
 def test_084():
@@ -1044,37 +1032,34 @@ void main() {
 
 
 def test_086():
-    """Valid: break and continue inside for loop"""
     source = """
 void main() {
-    for (int i = 0; i < 5; ++i) {
-        break;
-        continue;
+    int a;
+    switch (1) {
+        case 1:
+            int a;
+            int b;
+            float b;
     }
 }
 """
-    assert Checker(source).check_from_source() == "Static checking passed"
+    assert Checker(source).check_from_source() == "Redeclared(Variable, b)"
 
 
 def test_087():
-    """Valid: break inside switch (allowed)"""
     source = """
 void main() {
-    int day = 2;
-    switch (day) {
+    int a;
+    switch (1) {
         case 1:
-            printInt(1);
-            break;
+            int a;
+            int b;
         case 2:
-        case 3:
-            printInt(2);
-            break;
-        default:
-            printInt(0);
+            float b;
     }
 }
 """
-    assert Checker(source).check_from_source() == "Static checking passed"
+    assert Checker(source).check_from_source() == "Redeclared(Variable, b)"
 
 
 def test_088():
@@ -1208,18 +1193,14 @@ void main() {
 
 
 def test_098():
-    """Valid: switch with constant expression in case"""
-    source = """
-void main() {
-    int x = 5;
-    switch (x) {
-        case 2 + 3:
-            printInt(x);
-            break;
+        source = """
+    struct A {};
+    A B () {
+        int A;
+        A a;
     }
-}
-"""
-    assert Checker(source).check_from_source() == "Static checking passed"
+    """
+        assert Checker(source).check_from_source() == "Static checking passed"
 
 
 def test_099():
