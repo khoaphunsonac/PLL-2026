@@ -129,7 +129,7 @@ class StaticChecker(ASTVisitor):
         self.ast = program
         return self.visit(program, None)
 
-    def visit_global_decl(self, decl: Decl, env: List[List[Symbol]]) -> List[List[Symbol]]:
+    def register_global_decl(self, decl: Decl, env: List[List[Symbol]]) -> List[List[Symbol]]:
         name = decl.name
         # Kiểm tra trùng lập tại Global Scope
         if any(sym.name == name for sym in env[0]):
@@ -222,9 +222,8 @@ class StaticChecker(ASTVisitor):
         # Duyệt declaration theo thứ tự xuất hiện để bắt lỗi "dùng trước khi khai báo"
         # cho function và struct theo bộ test hiện tại.
         def visit_decl(acc_env: List[List[Symbol]], decl: Decl) -> List[List[Symbol]]:
-            next_env = self.visit_global_decl(decl, acc_env)
-            self.visit(decl, next_env)
-            return next_env
+            self.visit(decl, acc_env)
+            return self.register_global_decl(decl, acc_env)
 
         return reduce(visit_decl, node.decls, env)
 
@@ -237,9 +236,12 @@ class StaticChecker(ASTVisitor):
         return o
 
     def visit_func_decl(self, node: "FuncDecl", o: Any = None):
-        func_sym = self.lookup(node.name, o)
         old_func = self.current_func_sym
-        self.current_func_sym = func_sym
+        self.current_func_sym = Symbol(
+            node.name,
+            FuncType(node.return_type, [p.param_type for p in node.params]),
+            "Function",
+        )
         
         if node.return_type:
             self.visit(node.return_type, o)
@@ -250,12 +252,14 @@ class StaticChecker(ASTVisitor):
         
         # 2. Móc ruột các statement trong Block ngoài cùng ra để duyệt.
         # Tuyệt đối không gọi self.visit(node.body) vì nó sẽ nhảy vào visit_block_stmt và tạo scope rác.
-        reduce(lambda acc, stmt: self.visit(stmt, acc), node.body.statements, func_env)
+        self.visit(node.body, func_env)
 
         # 3. Xử lý kiểu trả về nếu hàm là auto/không khai báo
         if self.current_func_sym and self.current_func_sym.typ.return_type is None:
             self.current_func_sym.typ.return_type = VoidType()
-        
+        if node.return_type is None and self.current_func_sym:
+            node.return_type = self.current_func_sym.typ.return_type
+
         self.current_func_sym = old_func
         return o
 
@@ -343,9 +347,11 @@ class StaticChecker(ASTVisitor):
         if type(cond_t) != IntType:
             raise TypeMismatchInStatement(node)
             
-        self.visit(node.then_stmt, o)
+        then_env = o if type(node.then_stmt) == BlockStmt else ([[]] + o)
+        self.visit(node.then_stmt, then_env)
         if node.else_stmt:
-            self.visit(node.else_stmt, o)
+            else_env = o if type(node.else_stmt) == BlockStmt else ([[]] + o)
+            self.visit(node.else_stmt, else_env)
         return o
 
     def visit_while_stmt(self, node: "WhileStmt", o: Any = None):
@@ -356,7 +362,8 @@ class StaticChecker(ASTVisitor):
             raise TypeMismatchInStatement(node)
             
         self.in_loop += 1
-        self.visit(node.body, o)
+        body_env = o if type(node.body) == BlockStmt else ([[]] + o)
+        self.visit(node.body, body_env)
         self.in_loop -= 1
         return o
 
@@ -374,7 +381,8 @@ class StaticChecker(ASTVisitor):
             self.visit(node.update, for_env)
             
         self.in_loop += 1
-        self.visit(node.body, for_env)
+        body_env = for_env if type(node.body) == BlockStmt else ([[]] + for_env)
+        self.visit(node.body, body_env)
         self.in_loop -= 1
         return o
 
