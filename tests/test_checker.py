@@ -419,7 +419,7 @@ void main() {
     auto c = a + b;
 }
 """
-    assert Checker(source).check_from_source() == "TypeCannotBeInferred(a)"
+    assert Checker(source).check_from_source() == "TypeCannotBeInferred(BinaryOp(Identifier(a), +, Identifier(b)))"
 
 
 def test_033():
@@ -1244,3 +1244,15 @@ void main() {
 }
 """
     assert Checker(source).check_from_source() == "Static checking passed"
+
+def test_auto_cannot_be_inferred():
+    source = """
+    void main() {
+        auto x;
+        auto y;
+        auto z = x + y;
+    }
+    """
+    # Cập nhật expected thành toàn bộ biểu thức BinaryOp
+    expected = "TypeCannotBeInferred(BinaryOp(Identifier(x), +, Identifier(y)))"
+    assert Checker(source).check_from_source() == expected

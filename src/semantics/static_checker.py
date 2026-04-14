@@ -587,7 +587,7 @@ class StaticChecker(ASTVisitor):
 
         if op in numeric_ops:
             if left_t is None and right_t is None:
-                raise TypeCannotBeInferred(self._pick_inference_target(node.left, node.right))
+                raise TypeCannotBeInferred(node)
 
             if left_t is None:
                 if self._is_numeric_type(right_t):
