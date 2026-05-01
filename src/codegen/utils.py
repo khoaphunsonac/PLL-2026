@@ -61,11 +61,13 @@ class Access:
         sym: list["Symbol"],
         is_left: bool = False,
         is_first: bool = False,
+        expected_type=None,
     ):
         self.frame = frame
         self.sym = sym
         self.is_left = is_left
         self.is_first = is_first
+        self.expected_type = expected_type
 
 
 class SubBody:

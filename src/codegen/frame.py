@@ -173,3 +173,20 @@ class Frame:
         if not self.brk_label:
             raise IllegalRuntimeException("None break label")
         return self.brk_label[-1]
+
+    def enter_switch(self) -> int:
+        """Invoked when parsing into a switch statement."""
+        brk = self.get_new_label()
+        self.brk_label.append(brk)
+        if self.con_label:
+            self.con_label.append(self.con_label[-1])
+        else:
+            self.con_label.append(brk)
+        return brk
+
+    def exit_switch(self) -> None:
+        """Invoked when parsing out of a switch statement."""
+        if not self.con_label or not self.brk_label:
+            raise IllegalRuntimeException("Error when exit switch")
+        self.con_label.pop()
+        self.brk_label.pop()

@@ -189,9 +189,25 @@ class Emitter:
         Returns:
             Generated var directive string
         """
+        safe_name = self._sanitize_var_name(var_name)
         return self.jvm.emitVAR(
-            in_, var_name, self.get_jvm_type(in_type), from_label, to_label
+            in_, safe_name, self.get_jvm_type(in_type), from_label, to_label
         )
+
+    def _sanitize_var_name(self, name: str) -> str:
+        """
+        Sanitize variable names for Jasmin .var directives.
+        """
+        reserved = {
+            "from", "to", "is", "final", "class", "super", "public", "static",
+            "private", "protected", "interface", "implements", "extends", "void",
+            "int", "float", "double", "long", "char", "boolean", "return",
+            "new", "goto", "outer", "inner"
+        }
+        cleaned = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in name)
+        if not cleaned or cleaned[0].isdigit() or cleaned in reserved:
+            cleaned = "_" + cleaned
+        return cleaned
 
     def emit_read_var(self, name: str, in_type, index: int, frame) -> str:
         """
@@ -495,7 +511,7 @@ class Emitter:
             Generated JVM instruction string
         """
         frame.pop()
-        return self.jvm.emitIFGT(label)
+        return self.jvm.emitIFNE(label)
 
     def emit_if_false(self, label: int, frame) -> str:
         """
@@ -509,7 +525,7 @@ class Emitter:
             Generated JVM instruction string
         """
         frame.pop()
-        return self.jvm.emitIFLE(label)
+        return self.jvm.emitIFEQ(label)
 
     def emit_dup(self, frame) -> str:
         """
@@ -640,6 +656,26 @@ class Emitter:
         frame.pop()
         code += self.jvm.emitINVOKESPECIAL(class_name + "/<init>", "()V")
         # Stack now has one initialized object reference
+        return code
+
+    def emit_field(self, name: str, in_type) -> str:
+        """
+        Emit a public field declaration for a struct class.
+        """
+        return f".field public {name} {self.get_jvm_type(in_type)}\n"
+
+    def emit_default_constructor(self) -> str:
+        """
+        Emit a default constructor calling java/lang/Object.<init>.
+        """
+        code = ""
+        code += self.jvm.emitMETHOD("<init>", "()V", False)
+        code += self.jvm.emitLIMITSTACK(1)
+        code += self.jvm.emitLIMITLOCAL(1)
+        code += self.jvm.emitALOAD(0)
+        code += self.jvm.emitINVOKESPECIAL()
+        code += self.jvm.emitRETURN()
+        code += self.jvm.emitENDMETHOD()
         return code
 
     def emit_label(self, label: int, frame) -> str:
