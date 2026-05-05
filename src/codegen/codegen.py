@@ -17,6 +17,11 @@ class StringArrayType:
     pass
 
 
+class AutoType:
+    """Placeholder for 'auto' variables without initialization."""
+    pass
+
+
 class CodeGenerator(BaseVisitor):
     """Minimal AST -> Jasmin code generator."""
 
@@ -120,6 +125,21 @@ class CodeGenerator(BaseVisitor):
         if isinstance(member, VarDecl):
             return member.name, member.var_type
         raise RuntimeError(f"Unsupported struct member declaration: {type(member)}")
+
+    def _emit_auto_init(self, sym: Symbol, frame, target_type: Type) -> str:
+        sym.type = target_type
+        if is_int_type(target_type):
+            code = self.emit.emit_push_iconst(0, frame)
+        elif is_float_type(target_type):
+            code = self.emit.emit_push_fconst("0.0", frame)
+        elif is_string_type(target_type):
+            code = self.emit.emit_push_const("", StringType(), frame)
+        elif is_struct_type(target_type):
+            code = self.emit.emit_new_instance(target_type.struct_name, frame)
+        else:
+            raise RuntimeError("Unsupported auto initialization type")
+        code += self.emit.emit_write_var(sym.name, target_type, sym.value.value, frame)
+        return code
 
     def _scan_return_type(self, stmt: Stmt, sym: list[Symbol]) -> Type | None:
         infer_frame = Frame("__infer__", VoidType())
@@ -275,13 +295,28 @@ class CodeGenerator(BaseVisitor):
     def visit_var_decl(self, node: VarDecl, o: SubBody = None):
         frame = o.frame
         idx = frame.get_new_index()
+
+        if node.var_type is None and node.init_value is None:
+            o.sym.append(Symbol(node.name, AutoType(), Index(idx)))
+            return o
+
         var_type = node.var_type if node.var_type else self._infer_type(node.init_value, Access(frame, o.sym))
         self.emit.print_out(
             self.emit.emit_var(
                 idx, node.name, var_type, frame.get_start_label(), frame.get_end_label()
             )
         )
-        if node.init_value is not None:
+        if node.init_value is None:
+            if is_int_type(var_type):
+                self.emit.print_out(self.emit.emit_push_iconst(0, frame))
+            elif is_float_type(var_type):
+                self.emit.print_out(self.emit.emit_push_fconst("0.0", frame))
+            elif is_string_type(var_type):
+                self.emit.print_out(self.emit.emit_push_const("", StringType(), frame))
+            elif is_struct_type(var_type):
+                self.emit.print_out(self.emit.emit_new_instance(var_type.struct_name, frame))
+            self.emit.print_out(self.emit.emit_write_var(node.name, var_type, idx, frame))
+        else:
             access = Access(frame, o.sym)
             if isinstance(node.init_value, StructLiteral) and is_struct_type(var_type):
                 access.expected_type = var_type
@@ -420,11 +455,11 @@ class CodeGenerator(BaseVisitor):
             idx = lhs_sym.value.value
             access = o
             if isinstance(node.rhs, StructLiteral) and is_struct_type(lhs_sym.type):
-                access = Access(o.frame, o.sym, expected_type=lhs_sym.type)
+                access = Access(o.frame, o.sym, False, False, lhs_sym.type)
             rhs_code, rhs_type = self.visit(node.rhs, access)
-            if is_struct_type(lhs_sym.type) and is_struct_type(rhs_type):
-                rhs_code = self._emit_struct_copy(rhs_code, lhs_sym.type, o.frame)
-            elif is_float_type(lhs_sym.type) and is_int_type(rhs_type):
+            if isinstance(lhs_sym.type, AutoType):
+                lhs_sym.type = rhs_type
+            if is_float_type(lhs_sym.type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(o.frame)
             code = rhs_code + self.emit.emit_dup(o.frame) + self.emit.emit_write_var(
                 node.lhs.name, lhs_sym.type, idx, o.frame
@@ -435,11 +470,9 @@ class CodeGenerator(BaseVisitor):
             member_type = self._get_struct_member_type(obj_type, node.lhs.member)
             access = o
             if isinstance(node.rhs, StructLiteral) and is_struct_type(member_type):
-                access = Access(o.frame, o.sym, expected_type=member_type)
+                access = Access(o.frame, o.sym, False, False, member_type)
             rhs_code, rhs_type = self.visit(node.rhs, access)
-            if is_struct_type(member_type) and is_struct_type(rhs_type):
-                rhs_code = self._emit_struct_copy(rhs_code, member_type, o.frame)
-            elif is_float_type(member_type) and is_int_type(rhs_type):
+            if is_float_type(member_type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(o.frame)
             code = obj_code + rhs_code
             code += self.emit.emit_dup_x1(o.frame)
@@ -454,9 +487,16 @@ class CodeGenerator(BaseVisitor):
         code = ""
         for arg, param_type in zip(node.args, fn_type.param_types):
             access = o
-            if isinstance(arg, StructLiteral) and is_struct_type(param_type):
-                access = Access(o.frame, o.sym, expected_type=param_type)
-            arg_code, arg_type = self.visit(arg, access)
+            if isinstance(arg, Identifier):
+                sym = self._lookup_symbol(arg.name, o.sym)
+                if isinstance(sym.type, AutoType):
+                    code += self._emit_auto_init(sym, frame, param_type)
+                arg_code = self.emit.emit_read_var(sym.name, sym.type, sym.value.value, frame)
+                arg_type = sym.type
+            else:
+                if isinstance(arg, StructLiteral) and is_struct_type(param_type):
+                    access = Access(o.frame, o.sym, False, False, param_type)
+                arg_code, arg_type = self.visit(arg, access)
             if is_struct_type(param_type):
                 arg_code = self._emit_struct_copy(arg_code, param_type, frame)
             if is_float_type(param_type) and is_int_type(arg_type):
@@ -467,6 +507,10 @@ class CodeGenerator(BaseVisitor):
 
     def visit_identifier(self, node: Identifier, o: Access = None):
         sym = self._lookup_symbol(node.name, o.sym)
+        if isinstance(sym.type, AutoType):
+            code = self._emit_auto_init(sym, o.frame, IntType())
+            code += self.emit.emit_read_var(node.name, sym.type, sym.value.value, o.frame)
+            return code, sym.type
         return self.emit.emit_read_var(node.name, sym.type, sym.value.value, o.frame), sym.type
 
     def visit_int_literal(self, node: IntLiteral, o: Access = None):
@@ -552,8 +596,15 @@ class CodeGenerator(BaseVisitor):
 
     def visit_switch_stmt(self, node: SwitchStmt, o: Any = None):
         frame = o.frame
-        switch_type = self._infer_type(node.expr, Access(frame, o.sym))
-        switch_code, _ = self.visit(node.expr, Access(frame, o.sym))
+        frame.enter_scope(False)
+        start_label = frame.get_start_label()
+        end_label = frame.get_end_label()
+        self.emit.print_out(self.emit.emit_label(start_label, frame))
+
+        switch_body = SubBody(frame, list(o.sym))
+
+        switch_type = self._infer_type(node.expr, Access(frame, switch_body.sym))
+        switch_code, _ = self.visit(node.expr, Access(frame, switch_body.sym))
 
         temp_idx = frame.get_new_index()
         self.emit.print_out(switch_code)
@@ -566,7 +617,7 @@ class CodeGenerator(BaseVisitor):
 
         for case_stmt, case_label in zip(node.cases, case_labels):
             self.emit.print_out(self.emit.emit_read_var("$switch", switch_type, temp_idx, frame))
-            case_code, _ = self.visit(case_stmt.expr, Access(frame, o.sym))
+            case_code, _ = self.visit(case_stmt.expr, Access(frame, switch_body.sym))
             self.emit.print_out(case_code)
             self.emit.print_out(self.emit.emit_re_op("==", switch_type, frame))
             self.emit.print_out(self.emit.emit_if_true(case_label, frame))
@@ -576,15 +627,17 @@ class CodeGenerator(BaseVisitor):
         for case_stmt, case_label in zip(node.cases, case_labels):
             self.emit.print_out(self.emit.emit_label(case_label, frame))
             for stmt in case_stmt.statements:
-                self.visit(stmt, o)
+                self.visit(stmt, switch_body)
 
         if node.default_case:
             self.emit.print_out(self.emit.emit_label(default_label, frame))
             for stmt in node.default_case.statements:
-                self.visit(stmt, o)
+                self.visit(stmt, switch_body)
 
         self.emit.print_out(self.emit.emit_label(break_label, frame))
         frame.exit_switch()
+        self.emit.print_out(self.emit.emit_label(end_label, frame))
+        frame.exit_scope()
         return o
 
     def visit_case_stmt(self, node: CaseStmt, o: Any = None):
