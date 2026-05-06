@@ -32,6 +32,26 @@ class CodeGenerator(BaseVisitor):
         self.class_name = "TyC"
         self.structs: dict[str, list[tuple[str, Type]]] = {}
 
+    def _enter_switch(self, frame: Frame) -> int:
+        if hasattr(frame, "enter_switch"):
+            return frame.enter_switch()
+        break_label = frame.get_new_label()
+        frame.brk_label.append(break_label)
+        if frame.con_label:
+            frame.con_label.append(frame.con_label[-1])
+        else:
+            frame.con_label.append(break_label)
+        return break_label
+
+    def _exit_switch(self, frame: Frame) -> None:
+        if hasattr(frame, "exit_switch"):
+            frame.exit_switch()
+            return
+        if not frame.con_label or not frame.brk_label:
+            raise RuntimeError("Error when exit switch")
+        frame.con_label.pop()
+        frame.brk_label.pop()
+
     def _lookup_symbol(self, name: str, sym_list: list[Symbol]) -> Symbol:
         for sym in reversed(sym_list):
             if sym.name == name:
@@ -96,8 +116,33 @@ class CodeGenerator(BaseVisitor):
         for member in decl.members:
             member_name, member_type = self._get_struct_member_decl_info(member)
             struct_emitter.print_out(struct_emitter.emit_field(member_name, member_type))
-        struct_emitter.print_out(struct_emitter.emit_default_constructor())
+        struct_emitter.print_out(self._emit_struct_default_constructor(decl, struct_emitter))
         struct_emitter.emit_epilog()
+
+    def _emit_struct_default_constructor(self, decl: StructDecl, emitter: Emitter) -> str:
+        code = ""
+        code += ".method public <init>()V\n"
+        code += ".limit stack 4\n"
+        code += ".limit locals 1\n"
+        code += "\taload_0\n"
+        code += "\tinvokespecial java/lang/Object/<init>()V\n"
+
+        for member in decl.members:
+            member_name, member_type = self._get_struct_member_decl_info(member)
+            if is_string_type(member_type):
+                code += "\taload_0\n"
+                code += "\tldc \"\"\n"
+                code += f"\tputfield {decl.name}/{member_name} {emitter.get_jvm_type(member_type)}\n"
+            elif is_struct_type(member_type):
+                code += "\taload_0\n"
+                code += f"\tnew {member_type.struct_name}\n"
+                code += "\tdup\n"
+                code += f"\tinvokespecial {member_type.struct_name}/<init>()V\n"
+                code += f"\tputfield {decl.name}/{member_name} {emitter.get_jvm_type(member_type)}\n"
+
+        code += "\treturn\n"
+        code += ".end method\n"
+        return code
 
     def _emit_struct_copy(self, value_code: str, struct_type, frame) -> str:
         struct_name = struct_type.struct_name
@@ -249,6 +294,20 @@ class CodeGenerator(BaseVisitor):
         start_label = frame.get_start_label()
         end_label = frame.get_end_label()
         self.emit.print_out(self.emit.emit_label(start_label, frame))
+
+        if node.name == "main":
+            self.emit.print_out(
+                self.emit.emit_get_static("java/util/Locale/US", "Ljava/util/Locale;", frame)
+            )
+            self.emit.print_out(
+                self.emit.emit_invoke_static_raw(
+                    "java/util/Locale/setDefault",
+                    "(Ljava/util/Locale;)V",
+                    frame,
+                    1,
+                    False,
+                )
+            )
 
         local_syms: list[Symbol] = []
         if node.name == "main":
@@ -455,7 +514,8 @@ class CodeGenerator(BaseVisitor):
             idx = lhs_sym.value.value
             access = o
             if isinstance(node.rhs, StructLiteral) and is_struct_type(lhs_sym.type):
-                access = Access(o.frame, o.sym, False, False, lhs_sym.type)
+                access = Access(o.frame, o.sym)
+                access.expected_type = lhs_sym.type
             rhs_code, rhs_type = self.visit(node.rhs, access)
             if isinstance(lhs_sym.type, AutoType):
                 lhs_sym.type = rhs_type
@@ -470,7 +530,8 @@ class CodeGenerator(BaseVisitor):
             member_type = self._get_struct_member_type(obj_type, node.lhs.member)
             access = o
             if isinstance(node.rhs, StructLiteral) and is_struct_type(member_type):
-                access = Access(o.frame, o.sym, False, False, member_type)
+                access = Access(o.frame, o.sym)
+                access.expected_type = member_type
             rhs_code, rhs_type = self.visit(node.rhs, access)
             if is_float_type(member_type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(o.frame)
@@ -495,7 +556,8 @@ class CodeGenerator(BaseVisitor):
                 arg_type = sym.type
             else:
                 if isinstance(arg, StructLiteral) and is_struct_type(param_type):
-                    access = Access(o.frame, o.sym, False, False, param_type)
+                    access = Access(o.frame, o.sym)
+                    access.expected_type = param_type
                 arg_code, arg_type = self.visit(arg, access)
             if is_struct_type(param_type):
                 arg_code = self._emit_struct_copy(arg_code, param_type, frame)
@@ -548,6 +610,12 @@ class CodeGenerator(BaseVisitor):
 
     def visit_for_stmt(self, node: ForStmt, o: Any = None):
         frame = o.frame
+        init_handled = False
+        if isinstance(node.init, VarDecl):
+            # Keep for-loop declared variables visible after the loop.
+            o = self.visit(node.init, o)
+            init_handled = True
+
         frame.enter_scope(False)
         start_scope = frame.get_start_label()
         end_scope = frame.get_end_label()
@@ -556,10 +624,8 @@ class CodeGenerator(BaseVisitor):
         local_syms = list(o.sym)
         sub_body = SubBody(frame, local_syms)
 
-        if node.init is not None:
-            if isinstance(node.init, VarDecl):
-                sub_body = self.visit(node.init, sub_body)
-            elif isinstance(node.init, ExprStmt):
+        if node.init is not None and not init_handled:
+            if isinstance(node.init, ExprStmt):
                 sub_body = self.visit(node.init, sub_body)
             else:
                 init_code, init_type = self.visit(node.init, Access(frame, sub_body.sym))
@@ -610,7 +676,7 @@ class CodeGenerator(BaseVisitor):
         self.emit.print_out(switch_code)
         self.emit.print_out(self.emit.emit_write_var("$switch", switch_type, temp_idx, frame))
 
-        break_label = frame.enter_switch()
+        break_label = self._enter_switch(frame)
 
         case_labels = [frame.get_new_label() for _ in node.cases]
         default_label = frame.get_new_label() if node.default_case else break_label
@@ -635,7 +701,7 @@ class CodeGenerator(BaseVisitor):
                 self.visit(stmt, switch_body)
 
         self.emit.print_out(self.emit.emit_label(break_label, frame))
-        frame.exit_switch()
+        self._exit_switch(frame)
         self.emit.print_out(self.emit.emit_label(end_label, frame))
         frame.exit_scope()
         return o

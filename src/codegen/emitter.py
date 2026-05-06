@@ -313,6 +313,30 @@ class Emitter:
             frame.push()
         return self.jvm.emitINVOKESTATIC(lexeme, self.get_jvm_type(in_))
 
+    def emit_get_static(self, lexeme: str, typ: str, frame) -> str:
+        """
+        Emit GETSTATIC for a raw JVM type descriptor.
+        """
+        frame.push()
+        return self.jvm.emitGETSTATIC(lexeme, typ)
+
+    def emit_invoke_static_raw(
+        self,
+        lexeme: str,
+        descriptor: str,
+        frame,
+        param_count: int,
+        has_return: bool,
+    ) -> str:
+        """
+        Emit INVOKESTATIC with a raw descriptor and manual stack handling.
+        """
+        for _ in range(param_count):
+            frame.pop()
+        if has_return:
+            frame.push()
+        return self.jvm.emitINVOKESTATIC(lexeme, descriptor)
+
     def emit_neg_op(self, in_, frame) -> str:
         """
         Generate ineg, fneg.
