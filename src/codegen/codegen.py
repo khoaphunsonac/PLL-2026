@@ -159,10 +159,42 @@ class CodeGenerator(BaseVisitor):
             code += self.emit.emit_read_var("$dst", struct_type, dst_idx, frame)
             code += self.emit.emit_read_var("$src", struct_type, src_idx, frame)
             code += self.emit.emit_get_field(f"{struct_name}/{member_name}", member_type, frame)
+            if is_struct_type(member_type):
+                code = self._emit_struct_copy(code, member_type, frame)
             code += self.emit.emit_put_field(f"{struct_name}/{member_name}", member_type, frame)
 
         code += self.emit.emit_read_var("$dst", struct_type, dst_idx, frame)
         return code
+
+    def _emit_read_with_default(self, fn_name: str, default_value, default_type, frame) -> tuple[str, Type]:
+        lbl_try_start = frame.get_new_label()
+        lbl_try_end = frame.get_new_label()
+        lbl_handler = frame.get_new_label()
+        lbl_done = frame.get_new_label()
+
+        code = (
+            f".catch java/util/NoSuchElementException from Label{lbl_try_start} "
+            f"to Label{lbl_try_end} using Label{lbl_handler}\n"
+        )
+        code += self.emit.emit_label(lbl_try_start, frame)
+        code += self.emit.emit_invoke_static(
+            f"io/{fn_name}", FunctionType([], default_type), frame
+        )
+        code += self.emit.emit_label(lbl_try_end, frame)
+        code += self.emit.emit_goto(lbl_done, frame)
+
+        code += self.emit.emit_label(lbl_handler, frame)
+        code += self.emit.emit_pop(frame)
+
+        if is_int_type(default_type):
+            code += self.emit.emit_push_iconst(int(default_value), frame)
+        elif is_float_type(default_type):
+            code += self.emit.emit_push_fconst(str(default_value), frame)
+        elif is_string_type(default_type):
+            code += self.emit.emit_push_const(str(default_value), StringType(), frame)
+
+        code += self.emit.emit_label(lbl_done, frame)
+        return code, default_type
 
     def _get_struct_member_decl_info(self, member) -> tuple[str, Type]:
         if isinstance(member, MemberDecl):
@@ -380,6 +412,8 @@ class CodeGenerator(BaseVisitor):
             if isinstance(node.init_value, StructLiteral) and is_struct_type(var_type):
                 access.expected_type = var_type
             rhs_code, rhs_type = self.visit(node.init_value, access)
+            if is_struct_type(var_type) and is_struct_type(rhs_type):
+                rhs_code = self._emit_struct_copy(rhs_code, var_type, frame)
             if is_float_type(var_type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(frame)
             self.emit.print_out(rhs_code)
@@ -519,6 +553,8 @@ class CodeGenerator(BaseVisitor):
             rhs_code, rhs_type = self.visit(node.rhs, access)
             if isinstance(lhs_sym.type, AutoType):
                 lhs_sym.type = rhs_type
+            if is_struct_type(lhs_sym.type) and is_struct_type(rhs_type):
+                rhs_code = self._emit_struct_copy(rhs_code, lhs_sym.type, o.frame)
             if is_float_type(lhs_sym.type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(o.frame)
             code = rhs_code + self.emit.emit_dup(o.frame) + self.emit.emit_write_var(
@@ -533,6 +569,8 @@ class CodeGenerator(BaseVisitor):
                 access = Access(o.frame, o.sym)
                 access.expected_type = member_type
             rhs_code, rhs_type = self.visit(node.rhs, access)
+            if is_struct_type(member_type) and is_struct_type(rhs_type):
+                rhs_code = self._emit_struct_copy(rhs_code, member_type, o.frame)
             if is_float_type(member_type) and is_int_type(rhs_type):
                 rhs_code += self.emit.emit_i2f(o.frame)
             code = obj_code + rhs_code
@@ -543,6 +581,14 @@ class CodeGenerator(BaseVisitor):
 
     def visit_func_call(self, node: FuncCall, o: Access = None):
         frame = o.frame
+        if node.name in ["readInt", "readFloat", "readString"]:
+            if node.name == "readInt":
+                return self._emit_read_with_default("readInt", 2, IntType(), frame)
+            if node.name == "readFloat":
+                return self._emit_read_with_default("readFloat", 2.2, FloatType(), frame)
+            if node.name == "readString":
+                return self._emit_read_with_default("readString", "votien", StringType(), frame)
+
         fn_sym = self.functions[node.name]
         fn_type = fn_sym.type
         code = ""
