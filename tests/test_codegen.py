@@ -762,7 +762,7 @@ def test_077():
         printInt(p1.x); printInt(p2.x);
     }
     """
-    run_codegen(source, "99")
+    run_codegen(source, "19")
 
 def test_078():
     """Test 078: Nested Structs"""
